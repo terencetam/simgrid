@@ -67,7 +67,7 @@ describe("simulateRun", () => {
 
 describe("monteCarlo", () => {
   it("runs 100 simulations and returns percentiles", () => {
-    const result = monteCarlo(saasStartup, 100, 42);
+    const { result } = monteCarlo(saasStartup, 100, 42);
 
     expect(result.nRuns).toBe(100);
     expect(result.percentiles.revenue).toBeDefined();
@@ -83,22 +83,39 @@ describe("monteCarlo", () => {
   });
 
   it("computes win probability between 0 and 1", () => {
-    const result = monteCarlo(saasStartup, 100, 42);
+    const { result } = monteCarlo(saasStartup, 100, 42);
 
     expect(result.winProbability).toBeGreaterThanOrEqual(0);
     expect(result.winProbability).toBeLessThanOrEqual(1);
   });
 
   it("returns per-goal success rates", () => {
-    const result = monteCarlo(saasStartup, 100, 42);
+    const { result } = monteCarlo(saasStartup, 100, 42);
 
     expect(result.perGoalSuccess["goal-arr"]).toBeDefined();
     expect(result.perGoalSuccess["goal-cash"]).toBeDefined();
   });
 
-  it("completes 500 runs in under 3 seconds", () => {
+  it("returns sample run traces for spaghetti animation", () => {
+    const { result, sampleRuns } = monteCarlo(saasStartup, 100, 42, undefined, 50);
+
+    expect(result.nRuns).toBe(100);
+    expect(sampleRuns.length).toBeLessThanOrEqual(50);
+    expect(sampleRuns.length).toBeGreaterThan(0);
+
+    // Each sample run should have the right length
+    for (const run of sampleRuns) {
+      expect(run.revenue).toHaveLength(24);
+      expect(run.cash).toHaveLength(24);
+      expect(run.customers).toHaveLength(24);
+      expect(run.profit).toHaveLength(24);
+      expect(typeof run.won).toBe("boolean");
+    }
+  });
+
+  it("completes 1000 runs in under 3 seconds", () => {
     const start = performance.now();
-    monteCarlo(saasStartup, 500, 42);
+    monteCarlo(saasStartup, 1000, 42);
     const elapsed = performance.now() - start;
 
     expect(elapsed).toBeLessThan(3000);

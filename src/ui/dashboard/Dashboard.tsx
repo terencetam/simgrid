@@ -2,9 +2,11 @@ import { useScenarioStore } from "@/store/scenario-store";
 import { GoalBar } from "./GoalBar";
 import { LeverPanel } from "./LeverPanel";
 import { MetricStrip } from "./MetricStrip";
+import { EventLog } from "./EventLog";
+import { SimulationChart } from "@/ui/charts/SimulationChart";
 import { FanChart } from "@/ui/charts/FanChart";
 import { ParentSize } from "@visx/responsive";
-import { useState } from "react";
+import { useState, useCallback } from "react";
 
 type ChartMetric = "revenue" | "cash" | "customers" | "profit";
 
@@ -21,31 +23,47 @@ const CHART_CONFIG: Record<
 export function Dashboard() {
   const scenario = useScenarioStore((s) => s.scenario);
   const result = useScenarioStore((s) => s.result);
+  const sampleRuns = useScenarioStore((s) => s.sampleRuns);
   const isRunning = useScenarioStore((s) => s.isRunning);
+  const progress = useScenarioStore((s) => s.progress);
+  const nRuns = useScenarioStore((s) => s.nRuns);
+  const animationPhase = useScenarioStore((s) => s.animationPhase);
   const runSimulation = useScenarioStore((s) => s.runSimulation);
+  const setAnimationPhase = useScenarioStore((s) => s.setAnimationPhase);
   const [activeMetric, setActiveMetric] = useState<ChartMetric>("revenue");
 
   const chartData = result?.percentiles[activeMetric] ?? {};
   const cfg = CHART_CONFIG[activeMetric];
 
-  // Find threshold from goals
   const goal = scenario.goals.find((g) => g.metric === cfg.goalMetric);
   const threshold = goal?.threshold;
 
+  const handleAnimationComplete = useCallback(() => {
+    setAnimationPhase("complete");
+  }, [setAnimationPhase]);
+
+  const showAnimatedChart =
+    sampleRuns.length > 0 &&
+    (animationPhase === "spaghetti" || animationPhase === "transition");
+
   return (
     <div className="h-screen flex flex-col bg-zinc-950">
-      {/* Goal bar */}
       <GoalBar
         scenarioName={scenario.name}
         winProbability={result?.winProbability ?? null}
         isRunning={isRunning}
+        animate={animationPhase === "spaghetti" || animationPhase === "transition"}
+        progress={progress}
+        nRuns={nRuns}
       />
 
-      {/* Main content */}
       <div className="flex flex-1 min-h-0">
-        {/* Lever panel */}
-        <div className="w-72 border-r border-zinc-800 overflow-y-auto bg-zinc-925">
+        {/* Lever panel + event log */}
+        <div className="w-72 border-r border-zinc-800 overflow-y-auto bg-zinc-925 flex flex-col">
           <LeverPanel />
+          <div className="border-t border-zinc-800">
+            <EventLog scenario={scenario} />
+          </div>
         </div>
 
         {/* Chart area */}
@@ -69,7 +87,23 @@ export function Dashboard() {
 
           {/* Chart */}
           <div className="flex-1 px-4 py-2 min-h-0">
-            {result ? (
+            {showAnimatedChart ? (
+              <ParentSize>
+                {({ width, height }) => (
+                  <SimulationChart
+                    fanData={chartData}
+                    sampleRuns={sampleRuns}
+                    metric={activeMetric}
+                    width={width}
+                    height={height}
+                    yLabel={cfg.label}
+                    threshold={threshold}
+                    phase={animationPhase}
+                    onAnimationComplete={handleAnimationComplete}
+                  />
+                )}
+              </ParentSize>
+            ) : result ? (
               <ParentSize>
                 {({ width, height }) => (
                   <FanChart
@@ -84,13 +118,26 @@ export function Dashboard() {
             ) : (
               <div className="flex items-center justify-center h-full text-zinc-600">
                 <div className="text-center">
-                  <div className="text-4xl mb-3">▶</div>
-                  <div className="text-lg">
-                    Adjust levers, then press Run
-                  </div>
-                  <div className="text-sm text-zinc-700 mt-1">
-                    500 Monte Carlo simulations will play out
-                  </div>
+                  {isRunning ? (
+                    <>
+                      <div className="text-4xl mb-3 animate-pulse">⚡</div>
+                      <div className="text-lg">Running simulation...</div>
+                      <div className="text-sm text-zinc-700 mt-1">
+                        {progress} / {nRuns} runs complete
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-4xl mb-3">▶</div>
+                      <div className="text-lg">
+                        Adjust levers, then press Run
+                      </div>
+                      <div className="text-sm text-zinc-700 mt-1">
+                        {nRuns.toLocaleString()} Monte Carlo simulations will
+                        play out
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             )}
