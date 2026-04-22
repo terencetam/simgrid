@@ -1,0 +1,5 @@
+@import "tailwindcss";
+
+@theme {
+  --color-zinc-925: #111113;
+}
