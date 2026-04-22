@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { makeRng } from "@/engine/core/rng";
 import { simulateRun, allocateBuffers } from "@/engine/simulate";
 import { monteCarlo } from "@/engine/montecarlo";
+import { runSensitivity } from "@/engine/core/sensitivity";
 import { saasStartup } from "@/engine/templates/saas-startup";
 
 describe("simulateRun", () => {
@@ -113,11 +114,63 @@ describe("monteCarlo", () => {
     }
   });
 
+  it("returns financial statements with IS, BS, CF", () => {
+    const { result } = monteCarlo(saasStartup, 50, 42);
+
+    // Income statement
+    const is = result.financialStatements.incomeStatement;
+    expect(is.revenue).toBeDefined();
+    expect(is.revenue["50"]).toHaveLength(24);
+    expect(is.netIncome).toBeDefined();
+    expect(is.grossProfit).toBeDefined();
+
+    // Balance sheet
+    const bs = result.financialStatements.balanceSheet;
+    expect(bs.cash).toBeDefined();
+    expect(bs.totalAssets).toBeDefined();
+    expect(bs.totalEquity).toBeDefined();
+
+    // Cash flow statement
+    const cf = result.financialStatements.cashFlowStatement;
+    expect(cf.cashFromOperations).toBeDefined();
+    expect(cf.endingCash).toBeDefined();
+  });
+
+  it("returns unit economics data", () => {
+    const { result } = monteCarlo(saasStartup, 50, 42);
+
+    const ue = result.unitEconomics;
+    expect(ue.cac).toBeDefined();
+    expect(ue.ltv).toBeDefined();
+    expect(ue.ltvCacRatio).toBeDefined();
+    expect(ue.grossMarginPct).toBeDefined();
+
+    // Gross margin should be reasonable for SaaS (price $99, cogs $8 = ~92%)
+    const lastGM = ue.grossMarginPct["50"][23];
+    expect(lastGM).toBeGreaterThan(0.5);
+    expect(lastGM).toBeLessThanOrEqual(1);
+  });
+
   it("completes 1000 runs in under 3 seconds", () => {
     const start = performance.now();
     monteCarlo(saasStartup, 1000, 42);
     const elapsed = performance.now() - start;
 
     expect(elapsed).toBeLessThan(3000);
+  });
+});
+
+describe("sensitivity analysis", () => {
+  it("identifies levers and computes impact", () => {
+    const { result } = monteCarlo(saasStartup, 100, 42);
+    const tornado = runSensitivity(saasStartup, result.winProbability, 0.1, 100, 42);
+
+    expect(tornado.baseWinProb).toBe(result.winProbability);
+    expect(tornado.levers.length).toBeGreaterThan(0);
+
+    // Levers should be sorted by impact (descending)
+    for (let i = 1; i < tornado.levers.length; i++) {
+      expect(tornado.levers[i - 1].impact).toBeGreaterThanOrEqual(tornado.levers[i].impact);
+    }
   });
 });

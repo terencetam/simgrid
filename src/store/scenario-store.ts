@@ -3,12 +3,14 @@ import { wrap, proxy } from "comlink";
 import type { Scenario, MonteCarloResult } from "@/engine/schema";
 import type { SampleRun } from "@/engine/montecarlo";
 import type { MCWorkerAPI } from "@/workers/mc.worker";
+import type { TornadoResult } from "@/engine/core/sensitivity";
 import { saasStartup } from "@/engine/templates/saas-startup";
 import type { AnimationPhase } from "@/ui/charts/SimulationChart";
 
 interface ScenarioState {
   scenario: Scenario;
   result: MonteCarloResult | null;
+  sensitivityResult: TornadoResult | null;
   sampleRuns: SampleRun[];
   isRunning: boolean;
   nRuns: number;
@@ -81,6 +83,7 @@ function getWorkerApi() {
 export const useScenarioStore = create<ScenarioState>((set, get) => ({
   scenario: saasStartup,
   result: null,
+  sensitivityResult: null,
   sampleRuns: [],
   isRunning: false,
   nRuns: 1000,
@@ -104,6 +107,7 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
       isRunning: true,
       progress: 0,
       result: null,
+      sensitivityResult: null,
       sampleRuns: [],
       animationPhase: "idle",
     });
@@ -129,6 +133,12 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
         progress: nRuns,
         animationPhase: "spaghetti",
       });
+
+      // Run sensitivity analysis in background (non-blocking)
+      api.runSensitivityAnalysis(scenario, result.winProbability).then(
+        (sensitivityResult) => set({ sensitivityResult }),
+        (err) => console.error("Sensitivity analysis error:", err),
+      );
     } catch (err) {
       console.error("MC worker error:", err);
       set({ isRunning: false, animationPhase: "idle" });
