@@ -13,9 +13,13 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     const encoded = params.get("s");
     if (encoded) {
-      const scenario = decodeScenarioFromURL(encoded);
-      if (scenario) {
-        loadScenario(scenario);
+      try {
+        const scenario = decodeScenarioFromURL(encoded);
+        if (scenario) {
+          loadScenario(scenario);
+        }
+      } catch (err) {
+        console.warn("Failed to decode shared scenario URL:", err);
       }
       window.history.replaceState({}, "", window.location.pathname);
     }

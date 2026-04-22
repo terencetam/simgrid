@@ -20,6 +20,7 @@ interface ScenarioState {
   showProfiler: boolean;
   savedScenarioId: string | null;
   isDirty: boolean;
+  lastError: string | null;
 
   updateScenario: (patch: Partial<Scenario>) => void;
   updateVariable: (variableId: string, baseValue: number) => void;
@@ -27,6 +28,7 @@ interface ScenarioState {
   setAnimationPhase: (phase: AnimationPhase) => void;
   loadScenario: (scenario: Scenario, savedId?: string) => void;
   resetToProfiler: () => void;
+  clearError: () => void;
   saveCurrentScenario: () => Promise<void>;
   loadSavedScenario: (id: string) => Promise<void>;
 }
@@ -111,6 +113,7 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
   showProfiler: true,
   savedScenarioId: null,
   isDirty: false,
+  lastError: null,
 
   updateScenario: (patch) =>
     set((state) => ({
@@ -142,14 +145,12 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
 
   resetToProfiler: () => set({ showProfiler: true }),
 
+  clearError: () => set({ lastError: null }),
+
   saveCurrentScenario: async () => {
     const { scenario } = get();
-    try {
-      const id = await saveScenario(scenario);
-      set({ savedScenarioId: id, isDirty: false });
-    } catch (err) {
-      console.error("Failed to save scenario:", err);
-    }
+    const id = await saveScenario(scenario);
+    set({ savedScenarioId: id, isDirty: false });
   },
 
   loadSavedScenario: async (id) => {
@@ -202,7 +203,11 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
       );
     } catch (err) {
       console.error("MC worker error:", err);
-      set({ isRunning: false, animationPhase: "idle" });
+      set({
+        isRunning: false,
+        animationPhase: "idle",
+        lastError: err instanceof Error ? err.message : "Simulation failed",
+      });
     }
   },
 }));

@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, forwardRef } from "react";
 import { scaleLinear } from "@visx/scale";
 import { AreaClosed, LinePath } from "@visx/shape";
 import { AxisBottom, AxisLeft } from "@visx/axis";
@@ -20,13 +20,13 @@ interface FanChartProps {
 
 const MARGIN = { top: 20, right: 20, bottom: 40, left: 70 };
 
-export function FanChart({
+export const FanChart = forwardRef<SVGSVGElement, FanChartProps>(function FanChart({
   data,
   width,
   height,
   yLabel = "Revenue",
   threshold,
-}: FanChartProps) {
+}, ref) {
   const innerWidth = width - MARGIN.left - MARGIN.right;
   const innerHeight = height - MARGIN.top - MARGIN.bottom;
 
@@ -78,7 +78,7 @@ export function FanChart({
   }));
 
   return (
-    <svg width={width} height={height}>
+    <svg ref={ref} width={width} height={height}>
       <Group left={MARGIN.left} top={MARGIN.top}>
         <GridRows
           scale={yScale}
@@ -175,4 +175,4 @@ export function FanChart({
       </Group>
     </svg>
   );
-}
+});

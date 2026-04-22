@@ -15,7 +15,11 @@ import { ARCHETYPE_CONFIGS } from "@/engine/profiler";
 import { copyShareURL } from "@/lib/sharing";
 import { exportScenarioJSON } from "@/lib/file-io";
 import { ParentSize } from "@visx/responsive";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo, useRef } from "react";
+import { useKeyboardShortcuts, SHORTCUTS } from "@/lib/keyboard";
+import { exportResultsCSV, exportFinancialsCSV } from "@/lib/export-csv";
+import { exportChartPNG } from "@/lib/export-png";
+import { OnboardingTour } from "@/ui/onboarding/OnboardingTour";
 
 type ViewMode = "chart" | "financials" | "unitEcon" | "sensitivity" | "model" | "compare";
 type ChartMetric = "revenue" | "cash" | "customers" | "profit";
@@ -56,10 +60,16 @@ export function Dashboard() {
   const isDirty = useScenarioStore((s) => s.isDirty);
   const saveCurrentScenario = useScenarioStore((s) => s.saveCurrentScenario);
   const loadScenario = useScenarioStore((s) => s.loadScenario);
+  const lastError = useScenarioStore((s) => s.lastError);
+  const clearError = useScenarioStore((s) => s.clearError);
+
+  const chartRef = useRef<SVGSVGElement>(null);
 
   const [viewMode, setViewMode] = useState<ViewMode>("chart");
   const [activeMetric, setActiveMetric] = useState<ChartMetric>("revenue");
   const [showLibrary, setShowLibrary] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+  const [showTour, setShowTour] = useState(() => !localStorage.getItem("simgrid-tour-done"));
   const [toast, setToast] = useState<string | null>(null);
 
   const showToast = useCallback((msg: string) => {
@@ -82,8 +92,12 @@ export function Dashboard() {
     (animationPhase === "spaghetti" || animationPhase === "transition");
 
   const handleSave = useCallback(async () => {
-    await saveCurrentScenario();
-    showToast("Saved!");
+    try {
+      await saveCurrentScenario();
+      showToast("Saved!");
+    } catch {
+      showToast("Failed to save");
+    }
   }, [saveCurrentScenario, showToast]);
 
   const handleShare = useCallback(async () => {
@@ -109,6 +123,21 @@ export function Dashboard() {
     [loadScenario, showToast],
   );
 
+  const shortcutActions = useMemo(
+    () => ({
+      run: () => { if (!isRunning) runSimulation(); },
+      save: handleSave,
+      setView: (v: string) => setViewMode(v as ViewMode),
+      closeModal: () => {
+        if (showHelp) setShowHelp(false);
+        else if (showLibrary) setShowLibrary(false);
+      },
+      toggleHelp: () => setShowHelp((v) => !v),
+    }),
+    [isRunning, runSimulation, handleSave, showHelp, showLibrary],
+  );
+  useKeyboardShortcuts(shortcutActions);
+
   return (
     <div className="h-screen flex flex-col bg-zinc-950">
       <GoalBar
@@ -131,9 +160,22 @@ export function Dashboard() {
         onNewScenario={resetToProfiler}
       />
 
+      {/* Error banner */}
+      {lastError && (
+        <div className="flex items-center justify-between px-4 py-2 bg-red-950/50 border-b border-red-900/50">
+          <span className="text-xs text-red-300">{lastError}</span>
+          <button
+            onClick={clearError}
+            className="text-xs text-red-400 hover:text-red-200 ml-4"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       <div className="flex flex-1 min-h-0">
         {/* Lever panel + event log */}
-        <div className="w-72 border-r border-zinc-800 overflow-y-auto bg-zinc-925 flex flex-col">
+        <div className="w-72 border-r border-zinc-800 overflow-y-auto bg-zinc-925 flex flex-col" data-tour="levers">
           <LeverPanel />
           <div className="border-t border-zinc-800">
             <EventLog scenario={scenario} />
@@ -148,7 +190,7 @@ export function Dashboard() {
         {/* Main content area */}
         <div className="flex-1 flex flex-col min-w-0">
           {/* View tabs */}
-          <div className="flex items-center gap-1 px-4 pt-3">
+          <div className="flex items-center gap-1 px-4 pt-3" data-tour="view-tabs">
             {VIEW_TABS.map((tab) => (
               <button
                 key={tab.key}
@@ -182,10 +224,35 @@ export function Dashboard() {
                 ))}
               </>
             )}
+
+            {/* Export buttons */}
+            {result && (viewMode === "chart" || viewMode === "financials") && (
+              <>
+                <div className="flex-1" />
+                {viewMode === "chart" && chartRef.current && (
+                  <button
+                    onClick={() => exportChartPNG(chartRef.current!, scenario.name)}
+                    className="text-[10px] text-zinc-600 hover:text-zinc-300 transition-colors px-2 py-1"
+                  >
+                    PNG
+                  </button>
+                )}
+                <button
+                  onClick={() =>
+                    viewMode === "financials"
+                      ? exportFinancialsCSV(result, scenario.name)
+                      : exportResultsCSV(result, scenario.name)
+                  }
+                  className="text-[10px] text-zinc-600 hover:text-zinc-300 transition-colors px-2 py-1"
+                >
+                  CSV
+                </button>
+              </>
+            )}
           </div>
 
           {/* Content area */}
-          <div className="flex-1 px-4 py-2 min-h-0">
+          <div className="flex-1 px-4 py-2 min-h-0" data-tour="chart">
             {viewMode === "chart" && (
               <>
                 {showAnimatedChart ? (
@@ -208,6 +275,7 @@ export function Dashboard() {
                   <ParentSize>
                     {({ width, height }) => (
                       <FanChart
+                        ref={chartRef}
                         data={chartData}
                         width={width}
                         height={height}
@@ -298,7 +366,7 @@ export function Dashboard() {
           </div>
 
           {/* Run button */}
-          <div className="px-4 pb-3 flex justify-center">
+          <div className="px-4 pb-3 flex justify-center" data-tour="run-button">
             <button
               onClick={runSimulation}
               disabled={isRunning}
@@ -318,12 +386,49 @@ export function Dashboard() {
         </div>
       </div>
 
+      {/* Onboarding tour */}
+      {showTour && (
+        <OnboardingTour
+          steps={OnboardingTour.defaultSteps}
+          onComplete={() => {
+            setShowTour(false);
+            localStorage.setItem("simgrid-tour-done", "1");
+          }}
+        />
+      )}
+
       {/* Library modal */}
       {showLibrary && (
         <ScenarioLibrary
           onLoad={handleLibraryLoad}
           onClose={() => setShowLibrary(false)}
         />
+      )}
+
+      {/* Keyboard shortcuts help */}
+      {showHelp && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setShowHelp(false)} />
+          <div className="relative bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl p-6 max-w-sm">
+            <h3 className="text-sm font-semibold text-zinc-100 mb-4">Keyboard Shortcuts</h3>
+            <div className="flex flex-col gap-2">
+              {SHORTCUTS.map((s) => (
+                <div key={s.label} className="flex items-center justify-between">
+                  <span className="text-xs text-zinc-400">{s.description}</span>
+                  <kbd className="text-[10px] font-mono bg-zinc-800 text-zinc-300 px-1.5 py-0.5 rounded border border-zinc-700">
+                    {s.label}
+                  </kbd>
+                </div>
+              ))}
+            </div>
+            <button
+              onClick={() => setShowHelp(false)}
+              className="mt-4 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+            >
+              Close
+            </button>
+          </div>
+        </div>
       )}
 
       {/* Toast */}

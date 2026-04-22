@@ -38,7 +38,7 @@ export function CompareView({ currentScenario }: CompareViewProps) {
   useEffect(() => {
     listScenarios()
       .then(setSavedList)
-      .catch(() => {});
+      .catch((err) => console.warn("Failed to load scenarios:", err));
   }, []);
 
   const runMC = useCallback(
