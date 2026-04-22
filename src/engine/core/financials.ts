@@ -228,11 +228,7 @@ export function derivePeriodFinancials(
 
   // ── Balance Sheet ──
   const accDepreciation = prev.accDepreciation + flows.depreciation;
-  const fixedAssetsGross = prev.accDepreciation > 0
-    ? (prev.accDepreciation + flows.depreciation) / flows.depreciation * flows.capex || 0
-    : flows.capex;
-  // Simpler: track gross assets as cumulative capex
-  // For now, use a running gross from depreciation info
+  // fixedAssetsGross/Net are filled by the caller (simulate loop tracks cumulative capex)
   const debt = prev.debt + flows.debtDrawdown - flows.debtRepayment;
   const retainedEarnings = prev.retainedEarnings + netIncome;
 

@@ -1,7 +1,7 @@
 /**
  * Constraint enforcement and binding detection.
  */
-import type { Constraint } from "../schema";
+import type { Scenario } from "../schema";
 
 export interface ConstraintResult {
   /** constraint ID → fraction of periods where it was binding */
@@ -26,7 +26,7 @@ export function applyConstraints(
   targetId: string,
   constraints: ConstraintCheck[],
   bindingLog: Record<string, number>,
-  t: number
+  _t: number
 ): number {
   let result = value;
   for (const c of constraints) {
@@ -46,7 +46,7 @@ export function applyConstraints(
  * Prepare constraint checks from scenario constraints.
  * Resolves cap values that are numbers (string refs deferred to formula phase).
  */
-export function prepareConstraints(constraints: Constraint[]): ConstraintCheck[] {
+export function prepareConstraints(constraints: Scenario["constraints"]): ConstraintCheck[] {
   return constraints
     .filter((c) => typeof c.capValue === "number")
     .map((c) => ({

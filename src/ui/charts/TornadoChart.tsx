@@ -53,8 +53,6 @@ export function TornadoChart({ data }: TornadoChartProps) {
       <div className="flex flex-col gap-2">
         {topLevers.map((lever) => {
           const isSuggested = suggestedMove?.variableId === lever.variableId;
-          // Width proportional to impact
-          const barWidth = (lever.impact / maxImpact) * 100;
 
           // Determine if going up or down helps
           const upBetter = lever.winProbUp > lever.winProbDown;

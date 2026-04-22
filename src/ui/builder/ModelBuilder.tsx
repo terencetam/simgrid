@@ -104,7 +104,7 @@ function Section({
   );
 }
 
-export function ModelBuilder({ scenario, onUpdateVariable, onUpdateScenario }: ModelBuilderProps) {
+export function ModelBuilder({ scenario, onUpdateVariable, onUpdateScenario: _onUpdateScenario }: ModelBuilderProps) {
   return (
     <div className="flex flex-col h-full overflow-auto px-6 py-4">
       <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-4">

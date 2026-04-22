@@ -1,5 +1,5 @@
 import type { MonteCarloResult } from "@/engine/schema";
-import { formatCurrency, formatPercent, formatNumber } from "@/lib/format";
+import { formatCurrency, formatPercent } from "@/lib/format";
 
 interface UnitEconomicsTabProps {
   result: MonteCarloResult;
