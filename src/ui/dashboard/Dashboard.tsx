@@ -9,6 +9,7 @@ import { FinancialsTab } from "@/ui/financials/FinancialsTab";
 import { UnitEconomicsTab } from "@/ui/unit-economics/UnitEconomicsTab";
 import { TornadoChart } from "@/ui/charts/TornadoChart";
 import { ModelBuilder } from "@/ui/builder/ModelBuilder";
+import { ARCHETYPE_CONFIGS } from "@/engine/profiler";
 import { ParentSize } from "@visx/responsive";
 import { useState, useCallback } from "react";
 
@@ -46,6 +47,7 @@ export function Dashboard() {
   const setAnimationPhase = useScenarioStore((s) => s.setAnimationPhase);
   const updateVariable = useScenarioStore((s) => s.updateVariable);
   const updateScenario = useScenarioStore((s) => s.updateScenario);
+  const resetToProfiler = useScenarioStore((s) => s.resetToProfiler);
   const [viewMode, setViewMode] = useState<ViewMode>("chart");
   const [activeMetric, setActiveMetric] = useState<ChartMetric>("revenue");
 
@@ -67,11 +69,17 @@ export function Dashboard() {
     <div className="h-screen flex flex-col bg-zinc-950">
       <GoalBar
         scenarioName={scenario.name}
+        archetypeLabel={
+          scenario.businessProfile?.archetype
+            ? ARCHETYPE_CONFIGS[scenario.businessProfile.archetype]?.name
+            : undefined
+        }
         winProbability={result?.winProbability ?? null}
         isRunning={isRunning}
         animate={animationPhase === "spaghetti" || animationPhase === "transition"}
         progress={progress}
         nRuns={nRuns}
+        onNewScenario={resetToProfiler}
       />
 
       <div className="flex flex-1 min-h-0">

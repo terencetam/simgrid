@@ -16,11 +16,14 @@ interface ScenarioState {
   nRuns: number;
   progress: number;
   animationPhase: AnimationPhase;
+  showProfiler: boolean;
 
   updateScenario: (patch: Partial<Scenario>) => void;
   updateVariable: (variableId: string, baseValue: number) => void;
   runSimulation: () => void;
   setAnimationPhase: (phase: AnimationPhase) => void;
+  loadScenario: (scenario: Scenario) => void;
+  resetToProfiler: () => void;
 }
 
 function patchVariableInScenario(
@@ -62,6 +65,17 @@ function patchVariableInScenario(
       ch.conversionRate.baseValue = baseValue;
   }
 
+  for (const store of s.stores) {
+    if (store.fixedCostPerUnit.id === variableId)
+      store.fixedCostPerUnit.baseValue = baseValue;
+    if (store.revenueCapPerUnit.id === variableId)
+      store.revenueCapPerUnit.baseValue = baseValue;
+  }
+
+  for (const hc of s.otherHeadcount) {
+    if (hc.salary.id === variableId) hc.salary.baseValue = baseValue;
+  }
+
   return s;
 }
 
@@ -89,6 +103,7 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
   nRuns: 1000,
   progress: 0,
   animationPhase: "idle" as AnimationPhase,
+  showProfiler: true,
 
   updateScenario: (patch) =>
     set((state) => ({
@@ -101,6 +116,20 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
     })),
 
   setAnimationPhase: (phase) => set({ animationPhase: phase }),
+
+  loadScenario: (scenario) =>
+    set({
+      scenario,
+      result: null,
+      sensitivityResult: null,
+      sampleRuns: [],
+      isRunning: false,
+      progress: 0,
+      animationPhase: "idle",
+      showProfiler: false,
+    }),
+
+  resetToProfiler: () => set({ showProfiler: true }),
 
   runSimulation: async () => {
     set({

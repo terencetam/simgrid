@@ -1,20 +1,5 @@
 import type { Scenario } from "../schema";
-
-function mkVar(
-  id: string,
-  name: string,
-  baseValue: number,
-  overrides?: Partial<import("../schema").Variable>
-): import("../schema").Variable {
-  return {
-    id,
-    name,
-    kind: "constant",
-    baseValue,
-    resampleEachPeriod: true,
-    ...overrides,
-  };
-}
+import { mkVar } from "./helpers";
 
 export const saasStartup: Scenario = {
   id: "saas-startup",

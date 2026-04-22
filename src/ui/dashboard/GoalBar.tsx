@@ -3,6 +3,7 @@ import { formatPercent } from "@/lib/format";
 
 interface GoalBarProps {
   scenarioName: string;
+  archetypeLabel?: string;
   winProbability: number | null;
   isRunning: boolean;
   /** Whether to animate the counter from 0 to the target value */
@@ -10,17 +11,20 @@ interface GoalBarProps {
   /** Progress through MC runs (0 to nRuns) */
   progress?: number;
   nRuns?: number;
+  onNewScenario?: () => void;
 }
 
 const COUNTER_DURATION = 1200; // ms
 
 export function GoalBar({
   scenarioName,
+  archetypeLabel,
   winProbability,
   isRunning,
   animate,
   progress = 0,
   nRuns = 1000,
+  onNewScenario,
 }: GoalBarProps) {
   const [displayValue, setDisplayValue] = useState<number | null>(null);
   const animFrameRef = useRef<number>(0);
@@ -80,9 +84,19 @@ export function GoalBar({
     <div className="flex items-center justify-between px-6 py-3 border-b border-zinc-800 bg-zinc-925">
       <div className="flex items-center gap-3">
         <h1 className="text-lg font-semibold text-zinc-100">{scenarioName}</h1>
-        <span className="text-xs text-zinc-500 bg-zinc-800 px-2 py-0.5 rounded">
-          SaaS
-        </span>
+        {archetypeLabel && (
+          <span className="text-xs text-zinc-500 bg-zinc-800 px-2 py-0.5 rounded">
+            {archetypeLabel}
+          </span>
+        )}
+        {onNewScenario && (
+          <button
+            onClick={onNewScenario}
+            className="text-xs text-zinc-600 hover:text-zinc-300 transition-colors"
+          >
+            New
+          </button>
+        )}
       </div>
 
       <div className="flex items-center gap-4">
