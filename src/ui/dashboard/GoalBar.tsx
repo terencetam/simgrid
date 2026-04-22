@@ -6,15 +6,21 @@ interface GoalBarProps {
   archetypeLabel?: string;
   winProbability: number | null;
   isRunning: boolean;
-  /** Whether to animate the counter from 0 to the target value */
   animate: boolean;
-  /** Progress through MC runs (0 to nRuns) */
   progress?: number;
   nRuns?: number;
+  isDirty?: boolean;
   onNewScenario?: () => void;
+  onSave?: () => void;
+  onOpenLibrary?: () => void;
+  onShare?: () => void;
+  onExport?: () => void;
 }
 
-const COUNTER_DURATION = 1200; // ms
+const COUNTER_DURATION = 1200;
+
+const btnClass =
+  "text-xs text-zinc-600 hover:text-zinc-300 transition-colors";
 
 export function GoalBar({
   scenarioName,
@@ -24,7 +30,12 @@ export function GoalBar({
   animate,
   progress = 0,
   nRuns = 1000,
+  isDirty = false,
   onNewScenario,
+  onSave,
+  onOpenLibrary,
+  onShare,
+  onExport,
 }: GoalBarProps) {
   const [displayValue, setDisplayValue] = useState<number | null>(null);
   const animFrameRef = useRef<number>(0);
@@ -40,7 +51,6 @@ export function GoalBar({
       const tick = (now: number) => {
         const elapsed = now - startTimeRef.current;
         const t = Math.min(elapsed / COUNTER_DURATION, 1);
-        // Ease out cubic
         const eased = 1 - Math.pow(1 - t, 3);
         setDisplayValue(from + (to - from) * eased);
 
@@ -83,20 +93,46 @@ export function GoalBar({
   return (
     <div className="flex items-center justify-between px-6 py-3 border-b border-zinc-800 bg-zinc-925">
       <div className="flex items-center gap-3">
-        <h1 className="text-lg font-semibold text-zinc-100">{scenarioName}</h1>
+        <h1 className="text-lg font-semibold text-zinc-100">
+          {scenarioName}
+          {isDirty && (
+            <span className="text-indigo-400 ml-1" title="Unsaved changes">
+              *
+            </span>
+          )}
+        </h1>
         {archetypeLabel && (
           <span className="text-xs text-zinc-500 bg-zinc-800 px-2 py-0.5 rounded">
             {archetypeLabel}
           </span>
         )}
-        {onNewScenario && (
-          <button
-            onClick={onNewScenario}
-            className="text-xs text-zinc-600 hover:text-zinc-300 transition-colors"
-          >
-            New
-          </button>
-        )}
+        <div className="flex items-center gap-2 ml-1">
+          {onSave && (
+            <button onClick={onSave} className={btnClass} title="Save scenario">
+              Save
+            </button>
+          )}
+          {onOpenLibrary && (
+            <button onClick={onOpenLibrary} className={btnClass} title="Open library">
+              Library
+            </button>
+          )}
+          {onShare && (
+            <button onClick={onShare} className={btnClass} title="Copy share URL">
+              Share
+            </button>
+          )}
+          {onExport && (
+            <button onClick={onExport} className={btnClass} title="Export JSON">
+              Export
+            </button>
+          )}
+          {onNewScenario && (
+            <button onClick={onNewScenario} className={btnClass} title="New scenario">
+              New
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="flex items-center gap-4">

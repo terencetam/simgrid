@@ -6,6 +6,7 @@ import type { MCWorkerAPI } from "@/workers/mc.worker";
 import type { TornadoResult } from "@/engine/core/sensitivity";
 import { saasStartup } from "@/engine/templates/saas-startup";
 import type { AnimationPhase } from "@/ui/charts/SimulationChart";
+import { saveScenario, getSavedScenario } from "@/lib/db";
 
 interface ScenarioState {
   scenario: Scenario;
@@ -17,13 +18,17 @@ interface ScenarioState {
   progress: number;
   animationPhase: AnimationPhase;
   showProfiler: boolean;
+  savedScenarioId: string | null;
+  isDirty: boolean;
 
   updateScenario: (patch: Partial<Scenario>) => void;
   updateVariable: (variableId: string, baseValue: number) => void;
   runSimulation: () => void;
   setAnimationPhase: (phase: AnimationPhase) => void;
-  loadScenario: (scenario: Scenario) => void;
+  loadScenario: (scenario: Scenario, savedId?: string) => void;
   resetToProfiler: () => void;
+  saveCurrentScenario: () => Promise<void>;
+  loadSavedScenario: (id: string) => Promise<void>;
 }
 
 function patchVariableInScenario(
@@ -104,20 +109,24 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
   progress: 0,
   animationPhase: "idle" as AnimationPhase,
   showProfiler: true,
+  savedScenarioId: null,
+  isDirty: false,
 
   updateScenario: (patch) =>
     set((state) => ({
       scenario: { ...state.scenario, ...patch },
+      isDirty: true,
     })),
 
   updateVariable: (variableId, baseValue) =>
     set((state) => ({
       scenario: patchVariableInScenario(state.scenario, variableId, baseValue),
+      isDirty: true,
     })),
 
   setAnimationPhase: (phase) => set({ animationPhase: phase }),
 
-  loadScenario: (scenario) =>
+  loadScenario: (scenario, savedId) =>
     set({
       scenario,
       result: null,
@@ -127,9 +136,32 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
       progress: 0,
       animationPhase: "idle",
       showProfiler: false,
+      savedScenarioId: savedId ?? null,
+      isDirty: false,
     }),
 
   resetToProfiler: () => set({ showProfiler: true }),
+
+  saveCurrentScenario: async () => {
+    const { scenario } = get();
+    try {
+      const id = await saveScenario(scenario);
+      set({ savedScenarioId: id, isDirty: false });
+    } catch (err) {
+      console.error("Failed to save scenario:", err);
+    }
+  },
+
+  loadSavedScenario: async (id) => {
+    try {
+      const saved = await getSavedScenario(id);
+      if (saved) {
+        get().loadScenario(saved.scenario, saved.id);
+      }
+    } catch (err) {
+      console.error("Failed to load scenario:", err);
+    }
+  },
 
   runSimulation: async () => {
     set({

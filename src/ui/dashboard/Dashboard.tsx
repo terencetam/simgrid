@@ -9,11 +9,15 @@ import { FinancialsTab } from "@/ui/financials/FinancialsTab";
 import { UnitEconomicsTab } from "@/ui/unit-economics/UnitEconomicsTab";
 import { TornadoChart } from "@/ui/charts/TornadoChart";
 import { ModelBuilder } from "@/ui/builder/ModelBuilder";
+import { ScenarioLibrary } from "@/ui/library/ScenarioLibrary";
+import { CompareView } from "@/ui/compare/CompareView";
 import { ARCHETYPE_CONFIGS } from "@/engine/profiler";
+import { copyShareURL } from "@/lib/sharing";
+import { exportScenarioJSON } from "@/lib/file-io";
 import { ParentSize } from "@visx/responsive";
 import { useState, useCallback } from "react";
 
-type ViewMode = "chart" | "financials" | "unitEcon" | "sensitivity" | "model";
+type ViewMode = "chart" | "financials" | "unitEcon" | "sensitivity" | "model" | "compare";
 type ChartMetric = "revenue" | "cash" | "customers" | "profit";
 
 const VIEW_TABS: { key: ViewMode; label: string }[] = [
@@ -22,6 +26,7 @@ const VIEW_TABS: { key: ViewMode; label: string }[] = [
   { key: "unitEcon", label: "Unit Econ" },
   { key: "sensitivity", label: "Sensitivity" },
   { key: "model", label: "Model" },
+  { key: "compare", label: "Compare" },
 ];
 
 const CHART_CONFIG: Record<
@@ -48,8 +53,19 @@ export function Dashboard() {
   const updateVariable = useScenarioStore((s) => s.updateVariable);
   const updateScenario = useScenarioStore((s) => s.updateScenario);
   const resetToProfiler = useScenarioStore((s) => s.resetToProfiler);
+  const isDirty = useScenarioStore((s) => s.isDirty);
+  const saveCurrentScenario = useScenarioStore((s) => s.saveCurrentScenario);
+  const loadScenario = useScenarioStore((s) => s.loadScenario);
+
   const [viewMode, setViewMode] = useState<ViewMode>("chart");
   const [activeMetric, setActiveMetric] = useState<ChartMetric>("revenue");
+  const [showLibrary, setShowLibrary] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 2500);
+  }, []);
 
   const chartData = result?.percentiles[activeMetric] ?? {};
   const cfg = CHART_CONFIG[activeMetric];
@@ -65,6 +81,34 @@ export function Dashboard() {
     sampleRuns.length > 0 &&
     (animationPhase === "spaghetti" || animationPhase === "transition");
 
+  const handleSave = useCallback(async () => {
+    await saveCurrentScenario();
+    showToast("Saved!");
+  }, [saveCurrentScenario, showToast]);
+
+  const handleShare = useCallback(async () => {
+    try {
+      await copyShareURL(scenario);
+      showToast("Share URL copied!");
+    } catch {
+      showToast("Failed to copy URL");
+    }
+  }, [scenario, showToast]);
+
+  const handleExport = useCallback(() => {
+    exportScenarioJSON(scenario);
+    showToast("Exported!");
+  }, [scenario, showToast]);
+
+  const handleLibraryLoad = useCallback(
+    (s: typeof scenario) => {
+      loadScenario(s, s.id);
+      setShowLibrary(false);
+      showToast("Loaded!");
+    },
+    [loadScenario, showToast],
+  );
+
   return (
     <div className="h-screen flex flex-col bg-zinc-950">
       <GoalBar
@@ -79,6 +123,11 @@ export function Dashboard() {
         animate={animationPhase === "spaghetti" || animationPhase === "transition"}
         progress={progress}
         nRuns={nRuns}
+        isDirty={isDirty}
+        onSave={handleSave}
+        onOpenLibrary={() => setShowLibrary(true)}
+        onShare={handleShare}
+        onExport={handleExport}
         onNewScenario={resetToProfiler}
       />
 
@@ -242,6 +291,10 @@ export function Dashboard() {
                 onUpdateScenario={updateScenario}
               />
             )}
+
+            {viewMode === "compare" && (
+              <CompareView currentScenario={scenario} />
+            )}
           </div>
 
           {/* Run button */}
@@ -264,6 +317,21 @@ export function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* Library modal */}
+      {showLibrary && (
+        <ScenarioLibrary
+          onLoad={handleLibraryLoad}
+          onClose={() => setShowLibrary(false)}
+        />
+      )}
+
+      {/* Toast */}
+      {toast && (
+        <div className="fixed bottom-6 right-6 bg-zinc-800 border border-zinc-700 text-zinc-200 text-sm px-4 py-2 rounded-lg shadow-xl z-50">
+          {toast}
+        </div>
+      )}
     </div>
   );
 }

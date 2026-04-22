@@ -6,6 +6,7 @@ import { TEMPLATES } from "@/engine/templates";
 import { ArchetypeSelector } from "./ArchetypeSelector";
 import { QuestionForm } from "./QuestionForm";
 import { TemplatePicker } from "./TemplatePicker";
+import { ScenarioLibrary } from "@/ui/library/ScenarioLibrary";
 
 type Step = "choose" | "questions" | "templates";
 
@@ -16,6 +17,7 @@ interface ProfilerPageProps {
 export function ProfilerPage({ onComplete }: ProfilerPageProps) {
   const [step, setStep] = useState<Step>("choose");
   const [selectedArchetype, setSelectedArchetype] = useState<Archetype | null>(null);
+  const [showLibrary, setShowLibrary] = useState(false);
 
   const handleArchetypeSelect = (archetype: Archetype) => {
     setSelectedArchetype(archetype);
@@ -35,6 +37,11 @@ export function ProfilerPage({ onComplete }: ProfilerPageProps) {
   const handleTemplateSelect = (id: string) => {
     const scenario = TEMPLATES[id];
     if (scenario) onComplete(structuredClone(scenario));
+  };
+
+  const handleLibraryLoad = (scenario: Scenario) => {
+    setShowLibrary(false);
+    onComplete(scenario);
   };
 
   return (
@@ -59,12 +66,20 @@ export function ProfilerPage({ onComplete }: ProfilerPageProps) {
               <span className="text-xs text-zinc-600">or</span>
               <div className="flex-1 h-px bg-zinc-800" />
             </div>
-            <button
-              onClick={() => setStep("templates")}
-              className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors text-center"
-            >
-              Skip — pick a ready-made template
-            </button>
+            <div className="flex flex-col gap-2 items-center">
+              <button
+                onClick={() => setStep("templates")}
+                className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors"
+              >
+                Skip — pick a ready-made template
+              </button>
+              <button
+                onClick={() => setShowLibrary(true)}
+                className="text-sm text-zinc-600 hover:text-zinc-300 transition-colors"
+              >
+                Load a saved scenario
+              </button>
+            </div>
           </div>
         )}
 
@@ -88,6 +103,14 @@ export function ProfilerPage({ onComplete }: ProfilerPageProps) {
           </div>
         )}
       </div>
+
+      {/* Library modal */}
+      {showLibrary && (
+        <ScenarioLibrary
+          onLoad={handleLibraryLoad}
+          onClose={() => setShowLibrary(false)}
+        />
+      )}
     </div>
   );
 }
