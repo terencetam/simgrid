@@ -6,7 +6,7 @@
 type Archetype = "saas" | "restaurant" | "retail" | "ecommerce" | "wholesale" | "services" | "marketplace" | "manufacturing";
 
 interface VocabEntry {
-  label: string;
+  label?: string;
   hidden?: boolean;
 }
 

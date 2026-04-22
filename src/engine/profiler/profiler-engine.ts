@@ -195,8 +195,8 @@ function generateRetail(answers: Answers): Scenario {
 
   const monthlyRevPerStore = footTraffic * convRate * price;
 
-  const channels = [{
-    id: "ch-foot", name: "In-store foot traffic", channelType: "retail" as const,
+  const channels: Scenario["channels"] = [{
+    id: "ch-foot", name: "In-store foot traffic", channelType: "retail",
     capacityPerPeriod: mkVar("ch-cap", "Monthly foot traffic", footTraffic * stores),
     conversionRate: mkVar("ch-conv", "Foot traffic conversion", convRate),
     fixedCost: mkVar("ch-fixed", "Store operating costs", 0),
@@ -206,7 +206,7 @@ function generateRetail(answers: Answers): Scenario {
 
   if (hasOnline) {
     channels.push({
-      id: "ch-online", name: "Online store", channelType: "online" as const,
+      id: "ch-online", name: "Online store", channelType: "online",
       capacityPerPeriod: mkVar("ch-cap-online", "Monthly site visitors", footTraffic * 0.5),
       conversionRate: mkVar("ch-conv-online", "Online conversion", 0.02),
       fixedCost: mkVar("ch-fixed-online", "E-commerce platform", 500),
