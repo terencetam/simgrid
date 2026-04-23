@@ -1,9 +1,12 @@
 import { create } from "zustand";
 import { wrap, proxy } from "comlink";
-import type { Scenario, MonteCarloResult } from "@/engine/schema";
+import type { Scenario, MonteCarloResult, CausalLink, Variable, VariableGroup } from "@/engine/schema";
 import type { SampleRun } from "@/engine/montecarlo";
 import type { MCWorkerAPI } from "@/workers/mc.worker";
 import type { TornadoResult } from "@/engine/core/sensitivity";
+import { patchVariable } from "@/engine/core/variable-registry";
+import { compileCausalGraph } from "@/engine/core/causal-links";
+import { collectVariables } from "@/engine/core/variable-registry";
 import { saasStartup } from "@/engine/templates/saas-startup";
 import type { AnimationPhase } from "@/ui/charts/SimulationChart";
 import { saveScenario, getSavedScenario } from "@/lib/db";
@@ -24,6 +27,12 @@ interface ScenarioState {
 
   updateScenario: (patch: Partial<Scenario>) => void;
   updateVariable: (variableId: string, baseValue: number) => void;
+  addCustomVariable: (group: VariableGroup, name: string, baseValue: number) => void;
+  deleteCustomVariable: (variableId: string) => void;
+  addCausalLink: (link: CausalLink) => void;
+  removeCausalLink: (linkId: string) => void;
+  updateCausalLink: (linkId: string, patch: Partial<CausalLink>) => void;
+  updateNodePositions: (positions: Record<string, { x: number; y: number }>) => void;
   runSimulation: () => void;
   setAnimationPhase: (phase: AnimationPhase) => void;
   loadScenario: (scenario: Scenario, savedId?: string) => void;
@@ -31,59 +40,6 @@ interface ScenarioState {
   clearError: () => void;
   saveCurrentScenario: () => Promise<void>;
   loadSavedScenario: (id: string) => Promise<void>;
-}
-
-function patchVariableInScenario(
-  scenario: Scenario,
-  variableId: string,
-  baseValue: number
-): Scenario {
-  const s = structuredClone(scenario);
-
-  for (const p of s.products) {
-    if (p.price.id === variableId) p.price.baseValue = baseValue;
-    if (p.unitCogs.id === variableId) p.unitCogs.baseValue = baseValue;
-  }
-
-  for (const seg of s.segments) {
-    if (seg.tam.id === variableId) seg.tam.baseValue = baseValue;
-    if (seg.ourShare.id === variableId) seg.ourShare.baseValue = baseValue;
-    if (seg.churnRate.id === variableId) seg.churnRate.baseValue = baseValue;
-    if (seg.acv.id === variableId) seg.acv.baseValue = baseValue;
-  }
-
-  for (const ad of s.adChannels) {
-    if (ad.spend.id === variableId) ad.spend.baseValue = baseValue;
-    if (ad.cac.id === variableId) ad.cac.baseValue = baseValue;
-  }
-
-  for (const sr of s.salesRoles) {
-    if (sr.fullyLoadedCost.id === variableId)
-      sr.fullyLoadedCost.baseValue = baseValue;
-    if (sr.quota.id === variableId) sr.quota.baseValue = baseValue;
-    if (sr.quotaHitProbability.id === variableId)
-      sr.quotaHitProbability.baseValue = baseValue;
-  }
-
-  for (const ch of s.channels) {
-    if (ch.capacityPerPeriod.id === variableId)
-      ch.capacityPerPeriod.baseValue = baseValue;
-    if (ch.conversionRate.id === variableId)
-      ch.conversionRate.baseValue = baseValue;
-  }
-
-  for (const store of s.stores) {
-    if (store.fixedCostPerUnit.id === variableId)
-      store.fixedCostPerUnit.baseValue = baseValue;
-    if (store.revenueCapPerUnit.id === variableId)
-      store.revenueCapPerUnit.baseValue = baseValue;
-  }
-
-  for (const hc of s.otherHeadcount) {
-    if (hc.salary.id === variableId) hc.salary.baseValue = baseValue;
-  }
-
-  return s;
 }
 
 // Lazy-init worker singleton
@@ -123,8 +79,88 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
 
   updateVariable: (variableId, baseValue) =>
     set((state) => ({
-      scenario: patchVariableInScenario(state.scenario, variableId, baseValue),
+      scenario: patchVariable(state.scenario, variableId, baseValue),
       isDirty: true,
+    })),
+
+  addCustomVariable: (group, name, baseValue) =>
+    set((state) => {
+      const newVar: Variable = {
+        id: crypto.randomUUID(),
+        name,
+        kind: "constant",
+        baseValue,
+        resampleEachPeriod: true,
+        group,
+        valueType: baseValue > 0 && baseValue <= 1 ? "percent" : "currency",
+      };
+      return {
+        scenario: {
+          ...state.scenario,
+          customVariables: [...(state.scenario.customVariables ?? []), newVar],
+        },
+        isDirty: true,
+      };
+    }),
+
+  deleteCustomVariable: (variableId) =>
+    set((state) => ({
+      scenario: {
+        ...state.scenario,
+        customVariables: (state.scenario.customVariables ?? []).filter(
+          (v) => v.id !== variableId,
+        ),
+        causalLinks: (state.scenario.causalLinks ?? []).filter(
+          (l) => l.sourceId !== variableId && l.targetId !== variableId,
+        ),
+      },
+      isDirty: true,
+    })),
+
+  addCausalLink: (link) =>
+    set((state) => {
+      const newLinks = [...(state.scenario.causalLinks ?? []), link];
+      // Validate no cycles
+      const varIds = new Set(collectVariables(state.scenario).keys());
+      try {
+        compileCausalGraph(newLinks, varIds);
+      } catch {
+        return { lastError: "Cannot add link: would create a cycle." };
+      }
+      return {
+        scenario: { ...state.scenario, causalLinks: newLinks },
+        isDirty: true,
+      };
+    }),
+
+  removeCausalLink: (linkId) =>
+    set((state) => ({
+      scenario: {
+        ...state.scenario,
+        causalLinks: (state.scenario.causalLinks ?? []).filter(
+          (l) => l.id !== linkId,
+        ),
+      },
+      isDirty: true,
+    })),
+
+  updateCausalLink: (linkId, patch) =>
+    set((state) => ({
+      scenario: {
+        ...state.scenario,
+        causalLinks: (state.scenario.causalLinks ?? []).map((l) =>
+          l.id === linkId ? { ...l, ...patch } : l,
+        ),
+      },
+      isDirty: true,
+    })),
+
+  updateNodePositions: (positions) =>
+    set((state) => ({
+      scenario: {
+        ...state.scenario,
+        nodePositions: { ...(state.scenario.nodePositions ?? {}), ...positions },
+      },
     })),
 
   setAnimationPhase: (phase) => set({ animationPhase: phase }),

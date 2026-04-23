@@ -10,6 +10,8 @@ import {
   recordFinancials,
 } from "./core/financials";
 import { applyConstraints, prepareConstraints } from "./core/constraints";
+import { compileCausalGraph, applyCausalLinks } from "./core/causal-links";
+import { collectVariables } from "./core/variable-registry";
 
 /**
  * RunBuffers holds the time-series data for a single simulation run.
@@ -104,6 +106,23 @@ export function simulateRun(
   // Prepare constraints
   const constraintChecks = prepareConstraints(scenario.constraints);
 
+  // ── Compile causal graph (once per run) ──
+  const causalLinks = scenario.causalLinks ?? [];
+  const allVarRegistry = collectVariables(scenario);
+  const allVarIds = new Set(allVarRegistry.keys());
+  const causalGraph = causalLinks.length > 0
+    ? compileCausalGraph(causalLinks, allVarIds)
+    : null;
+
+  // Base values for computing relative deltas in causal links
+  const baseValues = new Map<string, number>();
+  for (const [id, reg] of allVarRegistry) {
+    baseValues.set(id, reg.variable.baseValue);
+  }
+
+  // History buffer for delayed causal links
+  const causalHistory = new Map<string, number[]>();
+
   // Pre-compute segment starting customers
   for (const seg of scenario.segments) {
     totalCustomers += resolveVar(seg.ourShare, 0, rng);
@@ -122,23 +141,62 @@ export function simulateRun(
     let periodSalesCost = 0;
     let periodHeadcount = 0;
 
+    // ── Causal links: resolve all variables then apply adjustments ──
+    let resolvedCache: Map<string, number> | null = null;
+    if (causalGraph && causalGraph.order.length > 0) {
+      // Pass 1: resolve all variables into a map
+      resolvedCache = new Map<string, number>();
+      for (const [id, reg] of allVarRegistry) {
+        resolvedCache.set(id, resolveVar(reg.variable, t, rng));
+      }
+
+      // Pass 2: apply causal links in topological order
+      for (const targetId of causalGraph.order) {
+        const currentVal = resolvedCache.get(targetId) ?? 0;
+        const adjusted = applyCausalLinks(
+          targetId, currentVal, causalGraph.linksByTarget,
+          resolvedCache, baseValues, causalHistory, rng,
+        );
+        resolvedCache.set(targetId, adjusted);
+      }
+
+      // Record history for delayed links
+      for (const [id, val] of resolvedCache) {
+        const hist = causalHistory.get(id);
+        if (hist) {
+          hist.push(val);
+        } else {
+          causalHistory.set(id, [val]);
+        }
+      }
+    }
+
+    // Helper: use cached causal-adjusted value if available
+    const getVar = (v: Variable, period: number): number => {
+      if (resolvedCache) {
+        const cached = resolvedCache.get(v.id);
+        if (cached !== undefined) return cached;
+      }
+      return resolveVar(v, period, rng);
+    };
+
     // ── Products: direct revenue from channels ──
     for (const product of scenario.products) {
       if (t < product.launchPeriod) continue;
-      const price = resolveVar(product.price, t, rng);
-      const unitCogs = resolveVar(product.unitCogs, t, rng);
+      const price = getVar(product.price, t);
+      const unitCogs = getVar(product.unitCogs, t);
 
       let totalUnits = 0;
       for (const channel of scenario.channels) {
-        const capacity = resolveVar(channel.capacityPerPeriod, t, rng);
-        const conversion = resolveVar(channel.conversionRate, t, rng);
+        const capacity = getVar(channel.capacityPerPeriod, t);
+        const conversion = getVar(channel.conversionRate, t);
         const rampIdx = Math.min(t, channel.rampCurve.length - 1);
         const rampFactor = channel.rampCurve[rampIdx];
         const units = capacity * conversion * rampFactor;
         totalUnits += units;
 
-        const fixedCost = resolveVar(channel.fixedCost, t, rng);
-        const varPct = resolveVar(channel.variableCostPct, t, rng);
+        const fixedCost = getVar(channel.fixedCost, t);
+        const varPct = getVar(channel.variableCostPct, t);
         periodOtherOpex += fixedCost + units * price * varPct;
       }
 
@@ -148,13 +206,13 @@ export function simulateRun(
 
     // ── Segments: subscription / cohort revenue ──
     for (const seg of scenario.segments) {
-      const churn = resolveVar(seg.churnRate, t, rng);
-      const acv = resolveVar(seg.acv, t, rng);
+      const churn = getVar(seg.churnRate, t);
+      const acv = getVar(seg.acv, t);
 
       let newCusts = 0;
       for (const ad of scenario.adChannels) {
-        const spend = resolveVar(ad.spend, t, rng);
-        const cac = resolveVar(ad.cac, t, rng);
+        const spend = getVar(ad.spend, t);
+        const cac = getVar(ad.cac, t);
         if (cac > 0) {
           newCusts += spend / cac;
         }
@@ -165,11 +223,11 @@ export function simulateRun(
       for (const role of scenario.salesRoles) {
         const rampIdx = Math.min(t, role.rampCurve.length - 1);
         const rampFactor = role.rampCurve[rampIdx];
-        const quota = resolveVar(role.quota, t, rng);
-        const hitProb = resolveVar(role.quotaHitProbability, t, rng);
+        const quota = getVar(role.quota, t);
+        const hitProb = getVar(role.quotaHitProbability, t);
 
         let activeReps = role.count;
-        const attrProb = resolveVar(role.attritionProbPerPeriod, t, rng);
+        const attrProb = getVar(role.attritionProbPerPeriod, t);
         for (let r = 0; r < role.count; r++) {
           if (bernoulliSample(rng, attrProb)) activeReps--;
         }
@@ -180,14 +238,14 @@ export function simulateRun(
           }
         }
 
-        const repCost = activeReps * resolveVar(role.fullyLoadedCost, t, rng);
+        const repCost = activeReps * getVar(role.fullyLoadedCost, t);
         periodSalaries += repCost;
         periodSalesCost += repCost;
         periodHeadcount += activeReps;
       }
 
       // TAM constraint
-      const tam = resolveVar(seg.tam, t, rng);
+      const tam = getVar(seg.tam, t);
       const maxNew = Math.max(0, tam - totalCustomers);
       newCusts = Math.min(newCusts, maxNew);
 
@@ -204,13 +262,13 @@ export function simulateRun(
       for (const [period, count] of store.openingSchedule) {
         if (t >= period) activeCount += count;
       }
-      const fixedCost = resolveVar(store.fixedCostPerUnit, t, rng);
+      const fixedCost = getVar(store.fixedCostPerUnit, t);
       periodRent += activeCount * fixedCost;
     }
 
     // ── Headcount ──
     for (const hc of scenario.otherHeadcount) {
-      const salary = resolveVar(hc.salary, t, rng);
+      const salary = getVar(hc.salary, t);
       periodSalaries += hc.count * salary * hc.onCostsMultiplier;
       periodHeadcount += hc.count;
 
@@ -254,7 +312,7 @@ export function simulateRun(
       else if (sc.triggerMetric === "headcount") metricValue = periodHeadcount;
 
       if (metricValue >= sc.threshold) {
-        const amount = resolveVar(sc.amount, t, rng);
+        const amount = getVar(sc.amount, t);
         if (sc.costType === "recurring") {
           periodOtherOpex += amount;
         } else if (sc.costType === "one_time" && !scalingTriggered.has(sc.id)) {
@@ -273,7 +331,7 @@ export function simulateRun(
     let depreciation = 0;
     let periodCapex = 0;
     for (const asset of scenario.fixedAssets) {
-      const cost = resolveVar(asset.purchaseCost, 0, rng);
+      const cost = getVar(asset.purchaseCost, 0);
       if (asset.usefulLifeMonths > 0) {
         depreciation += cost / asset.usefulLifeMonths;
       }

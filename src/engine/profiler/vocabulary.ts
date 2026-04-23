@@ -159,3 +159,31 @@ export function isHidden(
   if (!archetype) return false;
   return VOCAB[archetype]?.[fieldPath]?.hidden === true;
 }
+
+// ─── Group labels per archetype ─────────────────────────────────
+
+const DEFAULT_GROUP_LABELS: Record<string, string> = {
+  revenue: "Revenue",
+  sales_marketing: "Sales & Marketing",
+  operations: "Operations",
+  finance: "Finance",
+};
+
+const GROUP_LABEL_OVERRIDES: Record<string, Partial<Record<string, string>>> = {
+  saas: { operations: "Product & Engineering" },
+  restaurant: { revenue: "Menu & Pricing", operations: "Kitchen & Staff", sales_marketing: "Marketing" },
+  retail: { operations: "Store Operations" },
+  services: { revenue: "Billing", sales_marketing: "Pipeline" },
+  manufacturing: { operations: "Production" },
+};
+
+export function getGroupLabel(
+  archetype: Archetype | undefined,
+  group: string,
+): string {
+  if (archetype) {
+    const override = GROUP_LABEL_OVERRIDES[archetype]?.[group];
+    if (override) return override;
+  }
+  return DEFAULT_GROUP_LABELS[group] ?? group;
+}

@@ -22,6 +22,23 @@ export const DistributionKind = z.enum([
   "bernoulli",
 ]);
 
+export const VariableGroup = z.enum([
+  "revenue",
+  "sales_marketing",
+  "operations",
+  "finance",
+]);
+export type VariableGroup = z.infer<typeof VariableGroup>;
+
+export const ValueType = z.enum([
+  "currency",
+  "percent",
+  "count",
+  "days",
+  "ratio",
+]);
+export type ValueType = z.infer<typeof ValueType>;
+
 export const Variable = z.object({
   id: z.string(),
   name: z.string(),
@@ -38,6 +55,8 @@ export const Variable = z.object({
   expression: z.string().optional(),
   dependencies: z.array(z.string()).optional(),
   resampleEachPeriod: z.boolean().default(true),
+  group: VariableGroup.optional(),
+  valueType: ValueType.optional(),
 });
 export type Variable = z.infer<typeof Variable>;
 
@@ -201,6 +220,19 @@ export const Event = z.object({
   effects: z.array(EventEffect),
 });
 
+// ─── Causal Links (Meadows-style system dynamics) ────────────────
+
+export const CausalLink = z.object({
+  id: z.string(),
+  sourceId: z.string(),
+  targetId: z.string(),
+  polarity: z.enum(["positive", "negative"]),
+  strength: z.number().default(1.0),
+  delay: z.number().int().default(0),
+  noise: z.number().default(0),
+});
+export type CausalLink = z.infer<typeof CausalLink>;
+
 export const Goal = z.object({
   id: z.string(),
   metric: z.string(),
@@ -240,6 +272,9 @@ export const Scenario = z.object({
   debtFacilities: z.array(DebtFacility).default([]),
   businessProfile: BusinessProfile.optional(),
   taxRate: z.number().default(0),
+  customVariables: z.array(Variable).default([]),
+  causalLinks: z.array(CausalLink).default([]),
+  nodePositions: z.record(z.string(), z.object({ x: z.number(), y: z.number() })).default({}),
 });
 export type Scenario = z.infer<typeof Scenario>;
 

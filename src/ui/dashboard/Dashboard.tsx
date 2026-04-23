@@ -20,8 +20,9 @@ import { useKeyboardShortcuts, SHORTCUTS } from "@/lib/keyboard";
 import { exportResultsCSV, exportFinancialsCSV } from "@/lib/export-csv";
 import { exportChartPNG } from "@/lib/export-png";
 import { OnboardingTour } from "@/ui/onboarding/OnboardingTour";
+import { SystemEditor } from "@/ui/system/SystemEditor";
 
-type ViewMode = "chart" | "financials" | "unitEcon" | "sensitivity" | "model" | "compare";
+type ViewMode = "chart" | "financials" | "unitEcon" | "sensitivity" | "system" | "model" | "compare";
 type ChartMetric = "revenue" | "cash" | "customers" | "profit";
 
 const VIEW_TABS: { key: ViewMode; label: string }[] = [
@@ -29,6 +30,7 @@ const VIEW_TABS: { key: ViewMode; label: string }[] = [
   { key: "financials", label: "Financials" },
   { key: "unitEcon", label: "Unit Econ" },
   { key: "sensitivity", label: "Sensitivity" },
+  { key: "system", label: "System" },
   { key: "model", label: "Model" },
   { key: "compare", label: "Compare" },
 ];
@@ -175,7 +177,7 @@ export function Dashboard() {
 
       <div className="flex flex-1 min-h-0">
         {/* Lever panel + event log */}
-        <div className="w-72 border-r border-zinc-800 overflow-y-auto bg-zinc-925 flex flex-col" data-tour="levers">
+        <div className="w-80 border-r border-zinc-800 overflow-y-auto bg-zinc-925 flex flex-col" data-tour="levers">
           <LeverPanel />
           <div className="border-t border-zinc-800">
             <EventLog scenario={scenario} />
@@ -350,6 +352,12 @@ export function Dashboard() {
                   Run a simulation to see sensitivity analysis
                 </div>
               )
+            )}
+
+            {viewMode === "system" && (
+              <div className="h-full">
+                <SystemEditor />
+              </div>
             )}
 
             {viewMode === "model" && (

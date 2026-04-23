@@ -12,8 +12,8 @@ export const saasStartup: Scenario = {
     {
       id: "prod-1",
       name: "SaaS Platform",
-      price: mkVar("price", "Monthly subscription price", 99),
-      unitCogs: mkVar("cogs", "Infrastructure cost per user", 8),
+      price: mkVar("price", "Monthly subscription price", 99, { group: "revenue", valueType: "currency" }),
+      unitCogs: mkVar("cogs", "Infrastructure cost per user", 8, { group: "operations", valueType: "currency" }),
       launchPeriod: 0,
     },
   ],
@@ -24,7 +24,7 @@ export const saasStartup: Scenario = {
       name: "Online (self-serve)",
       channelType: "online",
       capacityPerPeriod: mkVar("ch-cap", "Monthly site visitors", 5000),
-      conversionRate: mkVar("ch-conv", "Trial-to-paid conversion", 0.03),
+      conversionRate: mkVar("ch-conv", "Trial-to-paid conversion", 0.03, { group: "sales_marketing", valueType: "percent" }),
       fixedCost: mkVar("ch-fixed", "Platform costs", 500),
       variableCostPct: mkVar("ch-var", "Payment processing %", 0.029),
       rampCurve: [0.5, 0.75, 1],
@@ -43,8 +43,10 @@ export const saasStartup: Scenario = {
         kind: "stochastic",
         distribution: "normal",
         distributionParams: { mean: 0.05, stddev: 0.01 },
+        group: "revenue",
+        valueType: "percent",
       }),
-      acv: mkVar("acv", "Annual contract value", 1188), // $99 × 12
+      acv: mkVar("acv", "Annual contract value", 1188, { group: "revenue", valueType: "currency" }), // $99 × 12
     },
   ],
 
@@ -163,4 +165,26 @@ export const saasStartup: Scenario = {
     answers: {},
   },
   taxRate: 0,
+  customVariables: [],
+  causalLinks: [
+    {
+      id: "link-spend-conv",
+      sourceId: "ad-spend",
+      targetId: "ch-conv",
+      polarity: "positive",
+      strength: 0.3,
+      delay: 0,
+      noise: 0,
+    },
+    {
+      id: "link-cac-churn",
+      sourceId: "ad-cac",
+      targetId: "churn",
+      polarity: "positive",
+      strength: 0.2,
+      delay: 1,
+      noise: 0,
+    },
+  ],
+  nodePositions: {},
 };
