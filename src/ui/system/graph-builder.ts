@@ -2,7 +2,7 @@
  * Graph Builder — converts a Scenario into React Flow nodes and edges.
  * Pure function, no React dependencies.
  */
-import type { Scenario, CausalLink } from "@/engine/schema";
+import type { Scenario } from "@/engine/schema";
 import type { Node, Edge } from "@xyflow/react";
 import { collectVariables } from "@/engine/core/variable-registry";
 

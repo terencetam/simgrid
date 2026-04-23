@@ -106,6 +106,9 @@ function generateSaas(answers: Answers): Scenario {
     scalingCosts: [], fixedAssets: [], debtFacilities: [],
     businessProfile: { archetype: "saas", stage: "early", answers },
     taxRate: 0,
+    customVariables: [],
+    causalLinks: [],
+    nodePositions: {},
   };
 }
 
@@ -180,6 +183,9 @@ function generateRestaurant(answers: Answers): Scenario {
     scalingCosts: [], fixedAssets: [], debtFacilities: [],
     businessProfile: { archetype: "restaurant", stage: "early", answers },
     taxRate: 0,
+    customVariables: [],
+    causalLinks: [],
+    nodePositions: {},
   };
 }
 
@@ -262,6 +268,9 @@ function generateRetail(answers: Answers): Scenario {
     scalingCosts: [], fixedAssets: [], debtFacilities: [],
     businessProfile: { archetype: "retail", stage: "early", answers },
     taxRate: 0,
+    customVariables: [],
+    causalLinks: [],
+    nodePositions: {},
   };
 }
 
@@ -337,6 +346,9 @@ function generateEcommerce(answers: Answers): Scenario {
     scalingCosts: [], fixedAssets: [], debtFacilities: [],
     businessProfile: { archetype: "ecommerce", stage: "early", answers },
     taxRate: 0,
+    customVariables: [],
+    causalLinks: [],
+    nodePositions: {},
   };
 }
 
@@ -414,6 +426,9 @@ function generateWholesale(answers: Answers): Scenario {
     scalingCosts: [], fixedAssets: [], debtFacilities: [],
     businessProfile: { archetype: "wholesale", stage: "early", answers },
     taxRate: 0,
+    customVariables: [],
+    causalLinks: [],
+    nodePositions: {},
   };
 }
 
@@ -490,6 +505,9 @@ function generateServices(answers: Answers): Scenario {
     scalingCosts: [], fixedAssets: [], debtFacilities: [],
     businessProfile: { archetype: "services", stage: "early", answers },
     taxRate: 0,
+    customVariables: [],
+    causalLinks: [],
+    nodePositions: {},
   };
 }
 
@@ -576,6 +594,9 @@ function generateMarketplace(answers: Answers): Scenario {
     scalingCosts: [], fixedAssets: [], debtFacilities: [],
     businessProfile: { archetype: "marketplace", stage: "early", answers },
     taxRate: 0,
+    customVariables: [],
+    causalLinks: [],
+    nodePositions: {},
   };
 }
 
@@ -671,6 +692,9 @@ function generateManufacturing(answers: Answers): Scenario {
     debtFacilities: [],
     businessProfile: { archetype: "manufacturing", stage: "early", answers },
     taxRate: 0,
+    customVariables: [],
+    causalLinks: [],
+    nodePositions: {},
   };
 }
 
