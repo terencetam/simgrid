@@ -1,20 +1,13 @@
 import type { Scenario } from "../schema";
-import { saasStartup } from "./saas-startup";
-import { restaurant } from "./restaurant";
-import { retail } from "./retail";
-import { ecommerce } from "./ecommerce";
-import { wholesale } from "./wholesale";
-import { services } from "./services";
-import { marketplace } from "./marketplace";
-import { manufacturing } from "./manufacturing";
+import { generateScenario } from "../profiler/profiler-engine";
 
 export const TEMPLATES: Record<string, Scenario> = {
-  "saas-startup": saasStartup,
-  restaurant,
-  retail,
-  ecommerce,
-  wholesale,
-  services,
-  marketplace,
-  manufacturing,
+  "saas-startup": generateScenario({ archetype: "saas", stage: "early", answers: {} }),
+  restaurant: generateScenario({ archetype: "restaurant", stage: "early", answers: {} }),
+  retail: generateScenario({ archetype: "retail", stage: "early", answers: {} }),
+  ecommerce: generateScenario({ archetype: "ecommerce", stage: "early", answers: {} }),
+  wholesale: generateScenario({ archetype: "wholesale", stage: "early", answers: {} }),
+  services: generateScenario({ archetype: "services", stage: "early", answers: {} }),
+  marketplace: generateScenario({ archetype: "marketplace", stage: "early", answers: {} }),
+  manufacturing: generateScenario({ archetype: "manufacturing", stage: "early", answers: {} }),
 };

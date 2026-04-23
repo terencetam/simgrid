@@ -1,13 +1,10 @@
 import { create } from "zustand";
 import { wrap, proxy } from "comlink";
-import type { Scenario, MonteCarloResult, CausalLink, Variable, VariableGroup } from "@/engine/schema";
+import type { Scenario, MonteCarloResult, ModelVariable } from "@/engine/schema";
 import type { SampleRun } from "@/engine/montecarlo";
 import type { MCWorkerAPI } from "@/workers/mc.worker";
 import type { TornadoResult } from "@/engine/core/sensitivity";
-import { patchVariable } from "@/engine/core/variable-registry";
-import { compileCausalGraph } from "@/engine/core/causal-links";
-import { collectVariables } from "@/engine/core/variable-registry";
-import { saasStartup } from "@/engine/templates/saas-startup";
+import { TEMPLATES } from "@/engine/templates";
 import type { AnimationPhase } from "@/ui/charts/SimulationChart";
 import { saveScenario, getSavedScenario } from "@/lib/db";
 
@@ -27,12 +24,9 @@ interface ScenarioState {
 
   updateScenario: (patch: Partial<Scenario>) => void;
   updateVariable: (variableId: string, baseValue: number) => void;
-  addCustomVariable: (group: VariableGroup, name: string, baseValue: number) => void;
-  deleteCustomVariable: (variableId: string) => void;
-  addCausalLink: (link: CausalLink) => void;
-  removeCausalLink: (linkId: string) => void;
-  updateCausalLink: (linkId: string, patch: Partial<CausalLink>) => void;
-  updateNodePositions: (positions: Record<string, { x: number; y: number }>) => void;
+  addVariable: (variable: ModelVariable) => void;
+  deleteVariable: (variableId: string) => void;
+  updateVariableField: (variableId: string, patch: Partial<ModelVariable>) => void;
   runSimulation: () => void;
   setAnimationPhase: (phase: AnimationPhase) => void;
   loadScenario: (scenario: Scenario, savedId?: string) => void;
@@ -58,7 +52,7 @@ function getWorkerApi() {
 }
 
 export const useScenarioStore = create<ScenarioState>((set, get) => ({
-  scenario: saasStartup,
+  scenario: TEMPLATES["saas-startup"],
   result: null,
   sensitivityResult: null,
   sampleRuns: [],
@@ -79,88 +73,44 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
 
   updateVariable: (variableId, baseValue) =>
     set((state) => ({
-      scenario: patchVariable(state.scenario, variableId, baseValue),
-      isDirty: true,
-    })),
-
-  addCustomVariable: (group, name, baseValue) =>
-    set((state) => {
-      const newVar: Variable = {
-        id: crypto.randomUUID(),
-        name,
-        kind: "constant",
-        baseValue,
-        resampleEachPeriod: true,
-        group,
-        valueType: baseValue > 0 && baseValue <= 1 ? "percent" : "currency",
-      };
-      return {
-        scenario: {
-          ...state.scenario,
-          customVariables: [...(state.scenario.customVariables ?? []), newVar],
-        },
-        isDirty: true,
-      };
-    }),
-
-  deleteCustomVariable: (variableId) =>
-    set((state) => ({
       scenario: {
         ...state.scenario,
-        customVariables: (state.scenario.customVariables ?? []).filter(
-          (v) => v.id !== variableId,
-        ),
-        causalLinks: (state.scenario.causalLinks ?? []).filter(
-          (l) => l.sourceId !== variableId && l.targetId !== variableId,
+        variables: state.scenario.variables.map((v) =>
+          v.id === variableId ? { ...v, baseValue } : v
         ),
       },
       isDirty: true,
     })),
 
-  addCausalLink: (link) =>
-    set((state) => {
-      const newLinks = [...(state.scenario.causalLinks ?? []), link];
-      // Validate no cycles
-      const varIds = new Set(collectVariables(state.scenario).keys());
-      try {
-        compileCausalGraph(newLinks, varIds);
-      } catch {
-        return { lastError: "Cannot add link: would create a cycle." };
-      }
-      return {
-        scenario: { ...state.scenario, causalLinks: newLinks },
-        isDirty: true,
-      };
-    }),
-
-  removeCausalLink: (linkId) =>
+  addVariable: (variable) =>
     set((state) => ({
       scenario: {
         ...state.scenario,
-        causalLinks: (state.scenario.causalLinks ?? []).filter(
-          (l) => l.id !== linkId,
+        variables: [...state.scenario.variables, variable],
+      },
+      isDirty: true,
+    })),
+
+  deleteVariable: (variableId) =>
+    set((state) => ({
+      scenario: {
+        ...state.scenario,
+        variables: state.scenario.variables.filter(
+          (v) => v.id !== variableId
         ),
       },
       isDirty: true,
     })),
 
-  updateCausalLink: (linkId, patch) =>
+  updateVariableField: (variableId, patch) =>
     set((state) => ({
       scenario: {
         ...state.scenario,
-        causalLinks: (state.scenario.causalLinks ?? []).map((l) =>
-          l.id === linkId ? { ...l, ...patch } : l,
+        variables: state.scenario.variables.map((v) =>
+          v.id === variableId ? { ...v, ...patch } : v
         ),
       },
       isDirty: true,
-    })),
-
-  updateNodePositions: (positions) =>
-    set((state) => ({
-      scenario: {
-        ...state.scenario,
-        nodePositions: { ...(state.scenario.nodePositions ?? {}), ...positions },
-      },
     })),
 
   setAnimationPhase: (phase) => set({ animationPhase: phase }),
@@ -232,7 +182,7 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
         animationPhase: "spaghetti",
       });
 
-      // Run sensitivity analysis in background (non-blocking)
+      // Run sensitivity analysis in background
       api.runSensitivityAnalysis(scenario, result.winProbability).then(
         (sensitivityResult) => set({ sensitivityResult }),
         (err) => console.error("Sensitivity analysis error:", err),

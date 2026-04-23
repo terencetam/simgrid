@@ -27,6 +27,20 @@ function MetricCard({ label, value, subtitle }: MetricCardProps) {
   );
 }
 
+/** Find a variable ID in percentiles that matches a chart metric name */
+function findVarId(
+  percentiles: Record<string, Record<string, number[]>>,
+  metric: string,
+): string | undefined {
+  // Direct match first
+  if (percentiles[metric]) return metric;
+  // Substring match (e.g. "total_revenue" for "revenue")
+  for (const varId of Object.keys(percentiles)) {
+    if (varId.includes(metric)) return varId;
+  }
+  return undefined;
+}
+
 export function MetricStrip({ result }: MetricStripProps) {
   if (!result) {
     return (
@@ -39,36 +53,45 @@ export function MetricStrip({ result }: MetricStripProps) {
     );
   }
 
-  const T = result.percentiles.revenue?.["50"]?.length ?? 0;
-  const lastIdx = T - 1;
+  const cards: { label: string; value: string; subtitle?: string }[] = [];
 
-  const endRevenue = result.percentiles.revenue?.["50"]?.[lastIdx] ?? 0;
-  const cashTrough = result.percentiles.cash?.["10"]
-    ? Math.min(...result.percentiles.cash["10"])
-    : 0;
-  const endCustomers = result.percentiles.customers?.["50"]?.[lastIdx] ?? 0;
-  const endProfit = result.percentiles.profit?.["50"]?.[lastIdx] ?? 0;
+  const revenueId = findVarId(result.percentiles, "revenue");
+  if (revenueId) {
+    const T = result.percentiles[revenueId]["50"]?.length ?? 0;
+    const endVal = result.percentiles[revenueId]["50"]?.[T - 1] ?? 0;
+    cards.push({ label: "Revenue (P50)", value: formatCurrency(endVal), subtitle: `Month ${T}` });
+  }
+
+  const cashId = findVarId(result.percentiles, "cash");
+  if (cashId) {
+    const p10 = result.percentiles[cashId]["10"];
+    const trough = p10 ? Math.min(...p10) : 0;
+    cards.push({ label: "Cash trough (P10)", value: formatCurrency(trough) });
+  }
+
+  const custId = findVarId(result.percentiles, "customers");
+  if (custId) {
+    const T = result.percentiles[custId]["50"]?.length ?? 0;
+    const endVal = result.percentiles[custId]["50"]?.[T - 1] ?? 0;
+    cards.push({ label: "Customers (P50)", value: formatNumber(endVal) });
+  }
+
+  const profitId = findVarId(result.percentiles, "profit");
+  if (profitId) {
+    const T = result.percentiles[profitId]["50"]?.length ?? 0;
+    const endVal = result.percentiles[profitId]["50"]?.[T - 1] ?? 0;
+    cards.push({
+      label: "Net Income (P50)",
+      value: formatCurrency(endVal),
+      subtitle: endVal >= 0 ? "Profitable" : "Burning",
+    });
+  }
 
   return (
     <div className="flex gap-3 px-6 py-4 overflow-x-auto">
-      <MetricCard
-        label="Revenue (P50)"
-        value={formatCurrency(endRevenue)}
-        subtitle={`Month ${T}`}
-      />
-      <MetricCard
-        label="Cash trough (P10)"
-        value={formatCurrency(cashTrough)}
-      />
-      <MetricCard
-        label="Customers (P50)"
-        value={formatNumber(endCustomers)}
-      />
-      <MetricCard
-        label="Net Income (P50)"
-        value={formatCurrency(endProfit)}
-        subtitle={endProfit >= 0 ? "Profitable" : "Burning"}
-      />
+      {cards.map((c) => (
+        <MetricCard key={c.label} label={c.label} value={c.value} subtitle={c.subtitle} />
+      ))}
     </div>
   );
 }

@@ -2,10 +2,7 @@ import type { Scenario, MonteCarloResult } from "./schema";
 import type { RunMetrics } from "./core/goals";
 import { computeWinProbability, checkGoal } from "./core/goals";
 import { makeRng } from "./core/rng";
-import { simulateRun, allocateBuffers } from "./simulate";
-import type { IncomeStatement, BalanceSheet, CashFlowStatement } from "./core/financials";
-import { computeUnitEconomics, type UnitEconomicsData } from "./core/unit-economics";
-import { aggregateBindings } from "./core/constraints";
+import { compileScenario, simulateRun } from "./simulate";
 
 const PERCENTILE_KEYS = ["5", "10", "25", "50", "75", "90", "95"] as const;
 const PERCENTILE_FRACTIONS = [0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95];
@@ -16,10 +13,7 @@ interface AggregatedSeries {
 
 /** A sampled individual run trace for spaghetti animation */
 export interface SampleRun {
-  revenue: number[];
-  cash: number[];
-  customers: number[];
-  profit: number[];
+  values: Record<string, number[]>;
   won: boolean;
 }
 
@@ -40,32 +34,16 @@ function computePercentiles(
     const values = allRuns.map((run) => run[t]).sort((a, b) => a - b);
     const n = values.length;
     for (let i = 0; i < PERCENTILE_KEYS.length; i++) {
-      const idx = Math.min(Math.floor(PERCENTILE_FRACTIONS[i] * n), n - 1);
+      const idx = Math.min(
+        Math.floor(PERCENTILE_FRACTIONS[i] * n),
+        n - 1
+      );
       result[PERCENTILE_KEYS[i]].push(values[idx]);
     }
   }
 
   return result;
 }
-
-// Keys to aggregate for financial statements
-const IS_AGG_KEYS: (keyof IncomeStatement)[] = [
-  "revenue", "cogs", "grossProfit", "totalOpex", "ebitda",
-  "depreciation", "ebit", "interest", "netIncome",
-];
-const BS_AGG_KEYS: (keyof BalanceSheet)[] = [
-  "cash", "accountsReceivable", "inventory", "fixedAssetsNet",
-  "totalAssets", "accountsPayable", "debt", "totalLiabilities",
-  "retainedEarnings", "totalEquity",
-];
-const CF_AGG_KEYS: (keyof CashFlowStatement)[] = [
-  "cashFromOperations", "cashFromInvesting", "cashFromFinancing",
-  "netCashChange", "endingCash",
-];
-const UE_AGG_KEYS: (keyof UnitEconomicsData)[] = [
-  "cac", "ltv", "ltvCacRatio", "paybackMonths",
-  "grossMarginPct", "revenuePerEmployee", "burnMultiple", "arpu",
-];
 
 /**
  * Run Monte Carlo simulation.
@@ -79,111 +57,80 @@ export function monteCarlo(
   sampleCount: number = 200
 ): MCResultWithTraces {
   const T = scenario.horizonPeriods;
+  const compiled = compileScenario(scenario);
 
-  const allRevenue: number[][] = [];
-  const allCash: number[][] = [];
-  const allProfit: number[][] = [];
-  const allCustomers: number[][] = [];
+  // Determine which variables to aggregate:
+  // - variables with chartMetric set
+  // - variables referenced by goals
+  const varsToAggregate = new Set<string>();
+  for (const v of scenario.variables) {
+    if (v.chartMetric) varsToAggregate.add(v.id);
+  }
+  for (const g of scenario.goals) {
+    // Goal metrics reference variable IDs
+    varsToAggregate.add(g.metric);
+  }
+
+  // Collect all run data for aggregation
+  const allSeries: Record<string, number[][]> = {};
+  for (const id of varsToAggregate) {
+    allSeries[id] = [];
+  }
+
   const allRunMetrics: RunMetrics[] = [];
-  const allBindingLogs: Record<string, number>[] = [];
-
-  // Financial statement series per run
-  const allIS: Record<string, number[][]> = {};
-  const allBS: Record<string, number[][]> = {};
-  const allCF: Record<string, number[][]> = {};
-  const allUE: Record<string, number[][]> = {};
-  for (const k of IS_AGG_KEYS) allIS[k] = [];
-  for (const k of BS_AGG_KEYS) allBS[k] = [];
-  for (const k of CF_AGG_KEYS) allCF[k] = [];
-  for (const k of UE_AGG_KEYS) allUE[k] = [];
-
-  const sampleEvery = Math.max(1, Math.floor(nRuns / Math.max(sampleCount, 1)));
   const sampleRuns: SampleRun[] = [];
-
-  // Average churn rate for LTV calculation
-  const avgChurn = scenario.segments.length > 0
-    ? scenario.segments[0].churnRate.baseValue
-    : 0.05;
+  const sampleEvery = Math.max(
+    1,
+    Math.floor(nRuns / Math.max(sampleCount, 1))
+  );
 
   for (let i = 0; i < nRuns; i++) {
     const rng = makeRng(baseSeed + i);
-    const buffers = allocateBuffers(T);
-    simulateRun(scenario, buffers, rng);
+    const result = simulateRun(compiled, rng);
 
-    const rev = [...buffers.revenue];
-    const cash = [...buffers.cash];
-    const prof = [...buffers.profit];
-    const custs = [...buffers.customers];
+    // Collect series for aggregation
+    for (const id of varsToAggregate) {
+      const s = result.series.get(id);
+      if (s) allSeries[id].push([...s]);
+    }
 
-    allRevenue.push(rev);
-    allCash.push(cash);
-    allProfit.push(prof);
-    allCustomers.push(custs);
-    allBindingLogs.push(buffers.bindingLog);
-
-    // Collect financial statement line items
-    for (const k of IS_AGG_KEYS) allIS[k].push([...buffers.financials.is[k]]);
-    for (const k of BS_AGG_KEYS) allBS[k].push([...buffers.financials.bs[k]]);
-    for (const k of CF_AGG_KEYS) allCF[k].push([...buffers.financials.cf[k]]);
-
-    // Compute unit economics for this run
-    const ue = computeUnitEconomics({
-      revenue: buffers.revenue,
-      cogs: buffers.cogs,
-      totalOpex: buffers.opex,
-      netIncome: buffers.profit,
-      customers: buffers.customers,
-      newCustomers: buffers.newCustomers,
-      totalAdSpend: buffers.totalAdSpend,
-      totalSalesCost: buffers.totalSalesCost,
-      totalHeadcount: buffers.totalHeadcount,
-      churnRate: avgChurn,
-      T,
-    });
-    for (const k of UE_AGG_KEYS) allUE[k].push([...ue[k]]);
-
-    const metrics: RunMetrics = {
-      revenue: buffers.revenue,
-      cash: buffers.cash,
-      profit: buffers.profit,
-      profitMargin: buffers.revenue.map((r, idx) =>
-        r > 0 ? buffers.profit[idx] / r : 0
-      ),
-      customers: buffers.customers,
-    };
+    // Build run metrics for goal checking
+    const metrics: RunMetrics = {};
+    for (const [id, s] of result.series) {
+      metrics[id] = s;
+    }
     allRunMetrics.push(metrics);
 
-    if (sampleCount > 0 && i % sampleEvery === 0 && sampleRuns.length < sampleCount) {
+    // Sample runs for spaghetti animation
+    if (
+      sampleCount > 0 &&
+      i % sampleEvery === 0 &&
+      sampleRuns.length < sampleCount
+    ) {
       const won = scenario.goals.every((g) => checkGoal(g, metrics));
-      sampleRuns.push({ revenue: rev, cash, customers: custs, profit: prof, won });
+      const values: Record<string, number[]> = {};
+      for (const id of varsToAggregate) {
+        const s = result.series.get(id);
+        if (s) values[id] = [...s];
+      }
+      sampleRuns.push({ values, won });
     }
 
     if (onProgress && i % 50 === 0) onProgress(i);
   }
 
-  const percentiles: Record<string, AggregatedSeries> = {
-    revenue: computePercentiles(allRevenue, T),
-    cash: computePercentiles(allCash, T),
-    profit: computePercentiles(allProfit, T),
-    customers: computePercentiles(allCustomers, T),
-  };
-
-  // Aggregate financial statements into percentiles
-  const incomeStatement: Record<string, AggregatedSeries> = {};
-  for (const k of IS_AGG_KEYS) incomeStatement[k] = computePercentiles(allIS[k], T);
-  const balanceSheet: Record<string, AggregatedSeries> = {};
-  for (const k of BS_AGG_KEYS) balanceSheet[k] = computePercentiles(allBS[k], T);
-  const cashFlowStatement: Record<string, AggregatedSeries> = {};
-  for (const k of CF_AGG_KEYS) cashFlowStatement[k] = computePercentiles(allCF[k], T);
-  const unitEconomics: Record<string, AggregatedSeries> = {};
-  for (const k of UE_AGG_KEYS) unitEconomics[k] = computePercentiles(allUE[k], T);
+  // Compute percentiles for each aggregated variable
+  const percentiles: Record<string, AggregatedSeries> = {};
+  for (const id of varsToAggregate) {
+    if (allSeries[id].length > 0) {
+      percentiles[id] = computePercentiles(allSeries[id], T);
+    }
+  }
 
   const { winProbability, perGoalSuccess } = computeWinProbability(
     scenario.goals,
     allRunMetrics
   );
-
-  const bindingConstraints = aggregateBindings(allBindingLogs, T);
 
   return {
     result: {
@@ -192,9 +139,6 @@ export function monteCarlo(
       percentiles,
       winProbability,
       perGoalSuccess,
-      bindingConstraints,
-      financialStatements: { incomeStatement, balanceSheet, cashFlowStatement },
-      unitEconomics,
     },
     sampleRuns,
   };

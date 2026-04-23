@@ -15,7 +15,7 @@ class SimGridDB extends Dexie {
 
   constructor() {
     super("simgrid");
-    this.version(1).stores({
+    this.version(2).stores({
       scenarios: "id, updatedAt",
     });
   }

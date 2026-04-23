@@ -1,9 +1,8 @@
 /**
- * Profiler engine: answers → complete Scenario generation.
- * Each archetype has a dedicated generator that builds appropriate primitives.
+ * Profiler engine: answers → formula-based Scenario.
+ * Each archetype generates a flat list of ModelVariables (inputs + formulas).
  */
-import type { Scenario } from "../schema";
-import { mkVar } from "../templates/helpers";
+import type { Scenario, ModelVariable } from "../schema";
 
 type Answers = Record<string, string | number | boolean>;
 
@@ -22,6 +21,40 @@ function bool(answers: Answers, key: string, fallback: boolean): boolean {
   return typeof v === "boolean" ? v : fallback;
 }
 
+// Helper to create input variables
+function input(
+  id: string,
+  name: string,
+  baseValue: number,
+  opts: Partial<ModelVariable> = {}
+): ModelVariable {
+  return {
+    id,
+    name,
+    kind: "input",
+    baseValue,
+    isLever: true,
+    ...opts,
+  };
+}
+
+// Helper to create formula variables
+function formula(
+  id: string,
+  name: string,
+  expr: string,
+  opts: Partial<ModelVariable> = {}
+): ModelVariable {
+  return {
+    id,
+    name,
+    kind: "formula",
+    formula: expr,
+    isLever: false,
+    ...opts,
+  };
+}
+
 // ─── SaaS ──────────────────────────────────────────────────────────
 
 function generateSaas(answers: Answers): Scenario {
@@ -32,11 +65,54 @@ function generateSaas(answers: Answers): Scenario {
   const cac = num(answers, "cac", 400);
   const employees = num(answers, "total_employees", 10);
 
-  const engCount = Math.max(1, Math.floor(employees * 0.5));
-  const opsCount = Math.max(1, Math.ceil(employees * 0.2));
-  const hasSales = method === "sales" || method === "mix";
   const hasAds = method === "ads" || method === "mix";
-  const salesCount = hasSales ? Math.max(1, Math.floor(employees * 0.3)) : 0;
+  const hasSales = method === "sales" || method === "mix";
+  const newCustBase = hasAds ? Math.round(15000 / cac) : 0;
+  const salesCusts = hasSales ? Math.round(employees * 0.3 * 3) : 0;
+  const totalNewCusts = newCustBase + salesCusts + (method === "organic" ? 20 : 5);
+
+  const variables: ModelVariable[] = [
+    // Inputs
+    input("price", "Monthly price", price, { group: "revenue", valueType: "currency", min: 10, max: price * 5, step: 1 }),
+    input("churn", "Monthly churn rate", churn, {
+      group: "risk", valueType: "percent", min: 0.005, max: 0.2, step: 0.005,
+      distribution: { kind: "normal", params: { mean: churn, stddev: churn * 0.2 } },
+    }),
+    input("new_customers", "New customers/month", totalNewCusts, {
+      group: "growth", valueType: "count", min: 0, max: totalNewCusts * 5, step: 1,
+      distribution: { kind: "normal", params: { mean: totalNewCusts, stddev: Math.max(3, totalNewCusts * 0.25) } },
+    }),
+    input("cac", "Customer acquisition cost", cac, {
+      group: "growth", valueType: "currency", min: 50, max: cac * 5, step: 10,
+      distribution: { kind: "normal", params: { mean: cac, stddev: cac * 0.12 } },
+    }),
+    input("team_size", "Team size", employees, { group: "costs", valueType: "count", min: 1, max: 100, step: 1 }),
+    input("avg_salary", "Avg monthly salary", 8000, { group: "costs", valueType: "currency", min: 3000, max: 20000, step: 500 }),
+    input("infra_per_user", "Infra cost per user", Math.round(price * 0.08), { group: "costs", valueType: "currency", min: 0, max: price, step: 1 }),
+    // Risk events
+    input("big_churn_event", "Big customer churns", 0, {
+      group: "risk", valueType: "count", isLever: false,
+      distribution: { kind: "bernoulli", params: { p: 0.05 } },
+    }),
+    input("competitor_event", "Competitor launches", 0, {
+      group: "risk", valueType: "count", isLever: false,
+      distribution: { kind: "bernoulli", params: { p: 0.03 } },
+    }),
+    // Formulas
+    formula("churned", "Churned customers", "prev.customers * churn", { group: "growth", valueType: "count" }),
+    formula("customers", "Total customers", "max(0, prev.customers + new_customers - churned)", {
+      group: "growth", valueType: "count", chartMetric: "customers", initialValue: customers,
+    }),
+    formula("mrr", "Monthly recurring revenue", "customers * price", { group: "revenue", valueType: "currency" }),
+    formula("event_impact", "Event impact", "1 - big_churn_event * 0.1 - competitor_event * 0.08", { group: "risk", valueType: "ratio" }),
+    formula("revenue", "Revenue", "mrr * event_impact", { group: "revenue", valueType: "currency", chartMetric: "revenue" }),
+    formula("cogs", "COGS", "customers * infra_per_user", { group: "costs", valueType: "currency" }),
+    formula("acq_cost", "Acquisition cost", "new_customers * cac", { group: "costs", valueType: "currency" }),
+    formula("payroll", "Payroll", "team_size * avg_salary * 1.3", { group: "costs", valueType: "currency" }),
+    formula("total_costs", "Total costs", "cogs + acq_cost + payroll", { group: "costs", valueType: "currency" }),
+    formula("profit", "Profit", "revenue - total_costs", { group: "revenue", valueType: "currency", chartMetric: "profit" }),
+    formula("cash", "Cash", "prev.cash + profit", { group: "revenue", valueType: "currency", chartMetric: "cash", initialValue: 500_000 }),
+  ];
 
   return {
     id: "profiler-saas",
@@ -44,71 +120,13 @@ function generateSaas(answers: Answers): Scenario {
     horizonPeriods: 24,
     timeStep: "month",
     currency: "AUD",
-    products: [{
-      id: "prod-1", name: "SaaS Platform",
-      price: mkVar("price", "Monthly subscription price", price),
-      unitCogs: mkVar("cogs", "Infrastructure cost per user", Math.round(price * 0.08)),
-      launchPeriod: 0,
-    }],
-    channels: [{
-      id: "ch-online", name: "Online (self-serve)", channelType: "online",
-      capacityPerPeriod: mkVar("ch-cap", "Monthly site visitors", 5000),
-      conversionRate: mkVar("ch-conv", "Trial-to-paid conversion", 0.03),
-      fixedCost: mkVar("ch-fixed", "Platform costs", 500),
-      variableCostPct: mkVar("ch-var", "Payment processing %", 0.029),
-      rampCurve: [0.5, 0.75, 1],
-    }],
-    stores: [],
-    segments: [{
-      id: "seg-1", name: "Customers",
-      tam: mkVar("tam", "Total addressable market", 50000),
-      ourShare: mkVar("share", "Current customers", customers),
-      churnRate: mkVar("churn", "Monthly churn rate", churn, {
-        kind: "stochastic", distribution: "normal",
-        distributionParams: { mean: churn, stddev: churn * 0.2 },
-      }),
-      acv: mkVar("acv", "Annual contract value", price * 12),
-    }],
-    salesRoles: salesCount > 0 ? [{
-      id: "sr-ae", name: "Account Executive", count: salesCount,
-      fullyLoadedCost: mkVar("ae-cost", "AE fully loaded cost", 12000),
-      rampCurve: [0.25, 0.5, 0.75, 1],
-      quota: mkVar("ae-quota", "Deals per month at full ramp", 5),
-      quotaHitProbability: mkVar("ae-hit", "Quota hit probability", 0.7, {
-        kind: "stochastic", distribution: "normal",
-        distributionParams: { mean: 0.7, stddev: 0.1 },
-      }),
-      attritionProbPerPeriod: mkVar("ae-attr", "Monthly attrition prob", 0.02),
-    }] : [],
-    adChannels: hasAds ? [{
-      id: "ad-1", name: "Paid Ads",
-      spend: mkVar("ad-spend", "Monthly ad spend", 15000),
-      cac: mkVar("ad-cac", "Cost per acquisition", cac, {
-        kind: "stochastic", distribution: "normal",
-        distributionParams: { mean: cac, stddev: cac * 0.12 },
-      }),
-    }] : [],
-    otherHeadcount: [
-      { id: "hc-eng", name: "Engineering", count: engCount, salary: mkVar("eng-salary", "Engineer monthly salary", 10000), onCostsMultiplier: 1.3, rampMonths: 2, attritionProbPerPeriod: 0.02, recruitmentCostPerHire: 8000 },
-      { id: "hc-ops", name: "Operations & Support", count: opsCount, salary: mkVar("ops-salary", "Ops monthly salary", 6000), onCostsMultiplier: 1.3, rampMonths: 1, attritionProbPerPeriod: 0.03, recruitmentCostPerHire: 3000 },
-    ],
-    events: [
-      { id: "evt-churn", name: "Big customer churns", trigger: { kind: "bernoulli", probability: 0.05 }, effects: [{ targetId: "revenue", operation: "add", value: -5000, persistent: false }] },
-      { id: "evt-competitor", name: "Competitor launches", trigger: { kind: "bernoulli", probability: 0.03 }, effects: [{ targetId: "revenue", operation: "multiply", value: 0.92, persistent: false }] },
-    ],
-    constraints: [],
+    startingCash: 500_000,
+    variables,
     goals: [
-      { id: "goal-arr", metric: "revenue", direction: "at_least", threshold: Math.max(price * customers * 3, 100000) / 12, byPeriod: 24, allPeriods: false },
+      { id: "goal-arr", metric: "revenue", direction: "at_least", threshold: Math.max(price * 100, 50000), byPeriod: 24, allPeriods: false },
       { id: "goal-cash", metric: "cash", direction: "at_least", threshold: 0, byPeriod: 24, allPeriods: true },
     ],
-    startingCash: 500_000,
-    paymentTerms: { dso: 30, dpo: 0, dio: 0, billingFrequency: "monthly" },
-    scalingCosts: [], fixedAssets: [], debtFacilities: [],
     businessProfile: { archetype: "saas", stage: "early", answers },
-    taxRate: 0,
-    customVariables: [],
-    causalLinks: [],
-    nodePositions: {},
   };
 }
 
@@ -124,12 +142,47 @@ function generateRestaurant(answers: Answers): Scenario {
   const liquor = bool(answers, "liquor_licence", true);
 
   const services = hours === "all_day" ? 3 : hours === "lunch_dinner" ? 2 : 1;
-  const dailyCovers = seats * turns * services;
-  const monthlyRevCap = dailyCovers * coverPrice * 30;
-  const kitchenStaff = Math.max(2, Math.ceil(seats / 20));
-  const serviceStaff = Math.max(2, Math.ceil(seats / 15));
-  const avgCoverWithDrinks = liquor ? coverPrice * 1.3 : coverPrice;
-  const monthlyRent = seats * 50; // ~$50/seat/month
+  const avgCover = liquor ? coverPrice * 1.3 : coverPrice;
+  const kitchenStaff = Math.max(2, Math.ceil(seats / 20)) * locations;
+  const serviceStaff = Math.max(2, Math.ceil(seats / 15)) * locations;
+  const monthlyRent = seats * 50 * locations;
+
+  const variables: ModelVariable[] = [
+    input("cover_price", "Average cover price", avgCover, { group: "revenue", valueType: "currency", min: 10, max: avgCover * 3, step: 1 }),
+    input("seats", "Total seats", seats * locations, { group: "revenue", valueType: "count", min: 10, max: 500, step: 5 }),
+    input("turns_per_day", "Table turns per service", turns, {
+      group: "revenue", valueType: "count", min: 1, max: 5, step: 0.5,
+      distribution: { kind: "normal", params: { mean: turns, stddev: 0.3 } },
+    }),
+    input("services_per_day", "Services per day", services, { group: "revenue", valueType: "count", min: 1, max: 3, step: 1 }),
+    input("occupancy", "Occupancy rate", 0.7, {
+      group: "risk", valueType: "percent", min: 0.2, max: 1, step: 0.05,
+      distribution: { kind: "normal", params: { mean: 0.7, stddev: 0.1 } },
+    }),
+    input("food_cost_pct", "Food cost %", foodCostPct, { group: "costs", valueType: "percent", min: 0.15, max: 0.5, step: 0.01 }),
+    input("kitchen_staff", "Kitchen staff", kitchenStaff, { group: "costs", valueType: "count", min: 1, max: 50, step: 1 }),
+    input("service_staff", "Service staff", serviceStaff, { group: "costs", valueType: "count", min: 1, max: 50, step: 1 }),
+    input("kitchen_wage", "Kitchen monthly wage", 4500, { group: "costs", valueType: "currency", min: 2000, max: 10000, step: 250 }),
+    input("service_wage", "Service monthly wage", 3500, { group: "costs", valueType: "currency", min: 2000, max: 8000, step: 250 }),
+    input("rent", "Monthly rent & utilities", monthlyRent, { group: "costs", valueType: "currency", min: 1000, max: monthlyRent * 3, step: 500 }),
+    input("mgmt_count", "Managers", locations, { group: "costs", valueType: "count", min: 1, max: 10, step: 1 }),
+    input("mgmt_salary", "Manager salary", 7000, { group: "costs", valueType: "currency", min: 3000, max: 15000, step: 500 }),
+    // Risk events
+    input("health_event", "Health inspection issue", 0, { group: "risk", isLever: false, distribution: { kind: "bernoulli", params: { p: 0.02 } } }),
+    input("staff_shortage", "Staff shortage", 0, { group: "risk", isLever: false, distribution: { kind: "bernoulli", params: { p: 0.04 } } }),
+    // Formulas
+    formula("daily_covers", "Daily covers", "seats * turns_per_day * services_per_day * occupancy", { group: "revenue", valueType: "count" }),
+    formula("monthly_covers", "Monthly covers", "daily_covers * 30", { group: "revenue", valueType: "count", chartMetric: "customers" }),
+    formula("event_impact", "Event impact", "1 - health_event * 0.5 - staff_shortage * 0.15", { group: "risk", valueType: "ratio" }),
+    formula("revenue", "Revenue", "monthly_covers * cover_price * event_impact", { group: "revenue", valueType: "currency", chartMetric: "revenue" }),
+    formula("food_costs", "Food costs", "revenue * food_cost_pct", { group: "costs", valueType: "currency" }),
+    formula("kitchen_payroll", "Kitchen payroll", "kitchen_staff * kitchen_wage * 1.2", { group: "costs", valueType: "currency" }),
+    formula("service_payroll", "Service payroll", "service_staff * service_wage * 1.2", { group: "costs", valueType: "currency" }),
+    formula("mgmt_payroll", "Management payroll", "mgmt_count * mgmt_salary * 1.3", { group: "costs", valueType: "currency" }),
+    formula("total_costs", "Total costs", "food_costs + kitchen_payroll + service_payroll + mgmt_payroll + rent", { group: "costs", valueType: "currency" }),
+    formula("profit", "Profit", "revenue - total_costs", { group: "revenue", valueType: "currency", chartMetric: "profit" }),
+    formula("cash", "Cash", "prev.cash + profit", { group: "revenue", valueType: "currency", chartMetric: "cash", initialValue: 200_000 * locations }),
+  ];
 
   return {
     id: "profiler-restaurant",
@@ -137,55 +190,13 @@ function generateRestaurant(answers: Answers): Scenario {
     horizonPeriods: 24,
     timeStep: "month",
     currency: "AUD",
-    products: [{
-      id: "prod-menu", name: "Menu",
-      price: mkVar("cover-price", "Average cover price", avgCoverWithDrinks),
-      unitCogs: mkVar("food-cost", "Food cost per cover", avgCoverWithDrinks * foodCostPct),
-      launchPeriod: 0,
-    }],
-    channels: [{
-      id: "ch-walkin", name: "Walk-in & reservations", channelType: "direct",
-      capacityPerPeriod: mkVar("ch-cap", "Monthly covers capacity", dailyCovers * 30),
-      conversionRate: mkVar("ch-conv", "Occupancy rate", 0.7, {
-        kind: "stochastic", distribution: "normal",
-        distributionParams: { mean: 0.7, stddev: 0.1 },
-      }),
-      fixedCost: mkVar("ch-fixed", "Booking system", 200),
-      variableCostPct: mkVar("ch-var", "Card processing %", 0.015),
-      rampCurve: [0.4, 0.6, 0.8, 1],
-    }],
-    stores: [{
-      id: "store-1", name: "Location", count: locations,
-      fixedCostPerUnit: mkVar("rent", "Monthly rent & utilities", monthlyRent),
-      revenueCapPerUnit: mkVar("rev-cap", "Revenue cap per location", monthlyRevCap),
-      rampCurve: [0.3, 0.5, 0.7, 0.85, 1],
-      openingSchedule: [],
-    }],
-    segments: [],
-    salesRoles: [],
-    adChannels: [],
-    otherHeadcount: [
-      { id: "hc-kitchen", name: "Kitchen staff", count: kitchenStaff * locations, salary: mkVar("kitchen-salary", "Kitchen staff salary", 4500), onCostsMultiplier: 1.2, rampMonths: 1, attritionProbPerPeriod: 0.05, recruitmentCostPerHire: 1000 },
-      { id: "hc-service", name: "Service staff", count: serviceStaff * locations, salary: mkVar("service-salary", "Service staff salary", 3500), onCostsMultiplier: 1.2, rampMonths: 0, attritionProbPerPeriod: 0.08, recruitmentCostPerHire: 500 },
-      { id: "hc-mgmt", name: "Management", count: locations, salary: mkVar("mgr-salary", "Manager salary", 7000), onCostsMultiplier: 1.3, rampMonths: 1, attritionProbPerPeriod: 0.03, recruitmentCostPerHire: 3000 },
-    ],
-    events: [
-      { id: "evt-health", name: "Health inspection issue", trigger: { kind: "bernoulli", probability: 0.02 }, effects: [{ targetId: "revenue", operation: "multiply", value: 0.5, persistent: false }] },
-      { id: "evt-staff", name: "Staff shortage", trigger: { kind: "bernoulli", probability: 0.04 }, effects: [{ targetId: "revenue", operation: "multiply", value: 0.85, persistent: false }] },
-    ],
-    constraints: [],
+    startingCash: 200_000 * locations,
+    variables,
     goals: [
       { id: "goal-breakeven", metric: "profit", direction: "at_least", threshold: 0, byPeriod: 18, allPeriods: false },
       { id: "goal-cash", metric: "cash", direction: "at_least", threshold: 0, byPeriod: 24, allPeriods: true },
     ],
-    startingCash: 200_000 * locations,
-    paymentTerms: { dso: 0, dpo: 15, dio: 5, billingFrequency: "monthly" },
-    scalingCosts: [], fixedAssets: [], debtFacilities: [],
     businessProfile: { archetype: "restaurant", stage: "early", answers },
-    taxRate: 0,
-    customVariables: [],
-    causalLinks: [],
-    nodePositions: {},
   };
 }
 
@@ -197,29 +208,39 @@ function generateRetail(answers: Answers): Scenario {
   const footTraffic = num(answers, "monthly_foot_traffic", 10000);
   const convRate = num(answers, "conversion_rate", 0.03);
   const cogsPct = num(answers, "cogs_pct", 0.55);
-  const hasOnline = bool(answers, "has_online", true);
 
-  const monthlyRevPerStore = footTraffic * convRate * price;
+  const storeStaff = Math.max(2, Math.ceil(stores * 4));
 
-  const channels: Scenario["channels"] = [{
-    id: "ch-foot", name: "In-store foot traffic", channelType: "retail",
-    capacityPerPeriod: mkVar("ch-cap", "Monthly foot traffic", footTraffic * stores),
-    conversionRate: mkVar("ch-conv", "Foot traffic conversion", convRate),
-    fixedCost: mkVar("ch-fixed", "Store operating costs", 0),
-    variableCostPct: mkVar("ch-var", "Card processing %", 0.02),
-    rampCurve: [0.5, 0.75, 1],
-  }];
-
-  if (hasOnline) {
-    channels.push({
-      id: "ch-online", name: "Online store", channelType: "online",
-      capacityPerPeriod: mkVar("ch-cap-online", "Monthly site visitors", footTraffic * 0.5),
-      conversionRate: mkVar("ch-conv-online", "Online conversion", 0.02),
-      fixedCost: mkVar("ch-fixed-online", "E-commerce platform", 500),
-      variableCostPct: mkVar("ch-var-online", "Processing + shipping %", 0.08),
-      rampCurve: [0.3, 0.6, 1],
-    });
-  }
+  const variables: ModelVariable[] = [
+    input("price", "Average product price", price, { group: "revenue", valueType: "currency", min: 1, max: price * 5, step: 1 }),
+    input("foot_traffic", "Monthly foot traffic", footTraffic * stores, {
+      group: "growth", valueType: "count", min: 500, max: footTraffic * stores * 3, step: 500,
+      distribution: { kind: "normal", params: { mean: footTraffic * stores, stddev: footTraffic * stores * 0.15 } },
+    }),
+    input("conversion", "Foot traffic conversion", convRate, {
+      group: "growth", valueType: "percent", min: 0.005, max: 0.3, step: 0.005,
+      distribution: { kind: "normal", params: { mean: convRate, stddev: convRate * 0.2 } },
+    }),
+    input("cogs_pct", "Cost of goods %", cogsPct, { group: "costs", valueType: "percent", min: 0.2, max: 0.8, step: 0.01 }),
+    input("store_staff", "Store staff", storeStaff, { group: "costs", valueType: "count", min: 1, max: 50, step: 1 }),
+    input("staff_salary", "Staff monthly salary", 3800, { group: "costs", valueType: "currency", min: 2000, max: 10000, step: 200 }),
+    input("store_rent", "Monthly store costs", 8000 * stores, { group: "costs", valueType: "currency", min: 2000, max: 50000, step: 1000 }),
+    input("mgr_count", "Managers", stores, { group: "costs", valueType: "count", min: 1, max: 20, step: 1 }),
+    input("mgr_salary", "Manager salary", 6500, { group: "costs", valueType: "currency", min: 3000, max: 15000, step: 500 }),
+    // Risk
+    input("seasonal_surge", "Seasonal surge", 0, { group: "risk", isLever: false, distribution: { kind: "bernoulli", params: { p: 0.08 } } }),
+    input("shrinkage_event", "Inventory shrinkage", 0, { group: "risk", isLever: false, distribution: { kind: "bernoulli", params: { p: 0.05 } } }),
+    // Formulas
+    formula("units_sold", "Units sold", "foot_traffic * conversion", { group: "growth", valueType: "count", chartMetric: "customers" }),
+    formula("gross_revenue", "Gross revenue", "units_sold * price", { group: "revenue", valueType: "currency" }),
+    formula("event_adj", "Event adjustment", "1 + seasonal_surge * 0.3 - shrinkage_event * 0.05", { group: "risk", valueType: "ratio" }),
+    formula("revenue", "Revenue", "gross_revenue * event_adj", { group: "revenue", valueType: "currency", chartMetric: "revenue" }),
+    formula("cogs", "Cost of goods", "revenue * cogs_pct", { group: "costs", valueType: "currency" }),
+    formula("payroll", "Payroll", "store_staff * staff_salary * 1.2 + mgr_count * mgr_salary * 1.3", { group: "costs", valueType: "currency" }),
+    formula("total_costs", "Total costs", "cogs + payroll + store_rent", { group: "costs", valueType: "currency" }),
+    formula("profit", "Profit", "revenue - total_costs", { group: "revenue", valueType: "currency", chartMetric: "profit" }),
+    formula("cash", "Cash", "prev.cash + profit", { group: "revenue", valueType: "currency", chartMetric: "cash", initialValue: 150_000 * stores }),
+  ];
 
   return {
     id: "profiler-retail",
@@ -227,50 +248,13 @@ function generateRetail(answers: Answers): Scenario {
     horizonPeriods: 24,
     timeStep: "month",
     currency: "AUD",
-    products: [{
-      id: "prod-1", name: "Average SKU",
-      price: mkVar("price", "Average product price", price),
-      unitCogs: mkVar("cogs", "Cost of goods", price * cogsPct),
-      launchPeriod: 0,
-    }],
-    channels,
-    stores: [{
-      id: "store-1", name: "Store", count: stores,
-      fixedCostPerUnit: mkVar("rent", "Monthly store costs", 8000),
-      revenueCapPerUnit: mkVar("rev-cap", "Revenue cap per store", monthlyRevPerStore * 1.5),
-      rampCurve: [0.4, 0.7, 0.9, 1],
-      openingSchedule: [],
-    }],
-    segments: [{
-      id: "seg-1", name: "Retail Customers",
-      tam: mkVar("tam", "Addressable market (monthly shoppers)", footTraffic * stores * 2),
-      ourShare: mkVar("share", "Current monthly customers", footTraffic * convRate * stores),
-      churnRate: mkVar("churn", "Customer lapse rate", 0.15),
-      acv: mkVar("acv", "Annual customer value", price * 6),
-    }],
-    salesRoles: [],
-    adChannels: [],
-    otherHeadcount: [
-      { id: "hc-store", name: "Store staff", count: Math.max(2, Math.ceil(stores * 4)), salary: mkVar("store-salary", "Store staff salary", 3800), onCostsMultiplier: 1.2, rampMonths: 0, attritionProbPerPeriod: 0.06, recruitmentCostPerHire: 800 },
-      { id: "hc-mgmt", name: "Management", count: stores, salary: mkVar("mgr-salary", "Store manager salary", 6500), onCostsMultiplier: 1.3, rampMonths: 1, attritionProbPerPeriod: 0.03, recruitmentCostPerHire: 3000 },
-    ],
-    events: [
-      { id: "evt-seasonal", name: "Seasonal surge", trigger: { kind: "bernoulli", probability: 0.08 }, effects: [{ targetId: "revenue", operation: "multiply", value: 1.3, persistent: false }] },
-      { id: "evt-shrinkage", name: "Inventory shrinkage", trigger: { kind: "bernoulli", probability: 0.05 }, effects: [{ targetId: "revenue", operation: "add", value: -2000, persistent: false }] },
-    ],
-    constraints: [],
+    startingCash: 150_000 * stores,
+    variables,
     goals: [
       { id: "goal-profit", metric: "profit", direction: "at_least", threshold: 0, byPeriod: 18, allPeriods: false },
       { id: "goal-cash", metric: "cash", direction: "at_least", threshold: 0, byPeriod: 24, allPeriods: true },
     ],
-    startingCash: 150_000 * stores,
-    paymentTerms: { dso: 0, dpo: 30, dio: 30, billingFrequency: "monthly" },
-    scalingCosts: [], fixedAssets: [], debtFacilities: [],
     businessProfile: { archetype: "retail", stage: "early", answers },
-    taxRate: 0,
-    customVariables: [],
-    causalLinks: [],
-    nodePositions: {},
   };
 }
 
@@ -284,9 +268,36 @@ function generateEcommerce(answers: Answers): Scenario {
   const cogsPct = num(answers, "cogs_pct", 0.40);
   const adSpend = num(answers, "monthly_ad_spend", 10000);
 
-  const monthlyOrders = visitors * convRate;
-  const effectiveOrders = monthlyOrders * (1 - returnRate);
-  const cac = adSpend > 0 ? adSpend / monthlyOrders : 50;
+  const variables: ModelVariable[] = [
+    input("aov", "Average order value", aov, { group: "revenue", valueType: "currency", min: 5, max: aov * 5, step: 1 }),
+    input("visitors", "Monthly site visitors", visitors, {
+      group: "growth", valueType: "count", min: 1000, max: visitors * 5, step: 1000,
+      distribution: { kind: "normal", params: { mean: visitors, stddev: visitors * 0.15 } },
+    }),
+    input("conversion", "Site conversion rate", convRate, {
+      group: "growth", valueType: "percent", min: 0.005, max: 0.15, step: 0.005,
+      distribution: { kind: "normal", params: { mean: convRate, stddev: convRate * 0.15 } },
+    }),
+    input("return_rate", "Return rate", returnRate, { group: "risk", valueType: "percent", min: 0, max: 0.5, step: 0.01 }),
+    input("cogs_pct", "Cost of goods %", cogsPct, { group: "costs", valueType: "percent", min: 0.1, max: 0.8, step: 0.01 }),
+    input("ad_spend", "Monthly ad spend", adSpend, { group: "costs", valueType: "currency", min: 0, max: adSpend * 5, step: 500 }),
+    input("team_size", "Team size", 5, { group: "costs", valueType: "count", min: 1, max: 30, step: 1 }),
+    input("avg_salary", "Avg monthly salary", 6000, { group: "costs", valueType: "currency", min: 3000, max: 15000, step: 500 }),
+    input("platform_cost", "Platform & hosting", 800, { group: "costs", valueType: "currency", min: 100, max: 5000, step: 100 }),
+    // Risk
+    input("seasonal_peak", "Seasonal peak", 0, { group: "risk", isLever: false, distribution: { kind: "bernoulli", params: { p: 0.08 } } }),
+    input("supply_disruption", "Supply chain disruption", 0, { group: "risk", isLever: false, distribution: { kind: "bernoulli", params: { p: 0.03 } } }),
+    // Formulas
+    formula("orders", "Monthly orders", "visitors * conversion", { group: "growth", valueType: "count" }),
+    formula("net_orders", "Net orders (after returns)", "orders * (1 - return_rate)", { group: "growth", valueType: "count", chartMetric: "customers" }),
+    formula("event_adj", "Event adjustment", "1 + seasonal_peak * 0.5 - supply_disruption * 0.3", { group: "risk", valueType: "ratio" }),
+    formula("revenue", "Revenue", "net_orders * aov * event_adj", { group: "revenue", valueType: "currency", chartMetric: "revenue" }),
+    formula("cogs", "Cost of goods", "revenue * cogs_pct", { group: "costs", valueType: "currency" }),
+    formula("payroll", "Payroll", "team_size * avg_salary * 1.25", { group: "costs", valueType: "currency" }),
+    formula("total_costs", "Total costs", "cogs + ad_spend + payroll + platform_cost", { group: "costs", valueType: "currency" }),
+    formula("profit", "Profit", "revenue - total_costs", { group: "revenue", valueType: "currency", chartMetric: "profit" }),
+    formula("cash", "Cash", "prev.cash + profit", { group: "revenue", valueType: "currency", chartMetric: "cash", initialValue: 200_000 }),
+  ];
 
   return {
     id: "profiler-ecommerce",
@@ -294,61 +305,13 @@ function generateEcommerce(answers: Answers): Scenario {
     horizonPeriods: 24,
     timeStep: "month",
     currency: "AUD",
-    products: [{
-      id: "prod-1", name: "Product",
-      price: mkVar("price", "Average order value", aov),
-      unitCogs: mkVar("cogs", "Cost of goods + shipping", aov * cogsPct),
-      launchPeriod: 0,
-    }],
-    channels: [{
-      id: "ch-online", name: "Online store", channelType: "online",
-      capacityPerPeriod: mkVar("ch-cap", "Monthly site visitors", visitors),
-      conversionRate: mkVar("ch-conv", "Site visitor conversion", convRate, {
-        kind: "stochastic", distribution: "normal",
-        distributionParams: { mean: convRate, stddev: convRate * 0.15 },
-      }),
-      fixedCost: mkVar("ch-fixed", "Platform & hosting", 800),
-      variableCostPct: mkVar("ch-var", "Processing + shipping %", 0.08),
-      rampCurve: [0.6, 0.8, 1],
-    }],
-    stores: [],
-    segments: [{
-      id: "seg-1", name: "Online Customers",
-      tam: mkVar("tam", "Addressable market", visitors * 5),
-      ourShare: mkVar("share", "Current monthly customers", effectiveOrders),
-      churnRate: mkVar("churn", "Customer lapse rate", 0.12),
-      acv: mkVar("acv", "Annual customer value", aov * 4),
-    }],
-    salesRoles: [],
-    adChannels: adSpend > 0 ? [{
-      id: "ad-1", name: "Paid Ads",
-      spend: mkVar("ad-spend", "Monthly ad spend", adSpend),
-      cac: mkVar("ad-cac", "Cost per acquisition", cac, {
-        kind: "stochastic", distribution: "normal",
-        distributionParams: { mean: cac, stddev: cac * 0.15 },
-      }),
-    }] : [],
-    otherHeadcount: [
-      { id: "hc-ops", name: "Operations", count: 3, salary: mkVar("ops-salary", "Ops salary", 5000), onCostsMultiplier: 1.2, rampMonths: 1, attritionProbPerPeriod: 0.04, recruitmentCostPerHire: 2000 },
-      { id: "hc-marketing", name: "Marketing", count: 2, salary: mkVar("mktg-salary", "Marketing salary", 7000), onCostsMultiplier: 1.3, rampMonths: 1, attritionProbPerPeriod: 0.03, recruitmentCostPerHire: 4000 },
-    ],
-    events: [
-      { id: "evt-seasonal", name: "Seasonal peak", trigger: { kind: "bernoulli", probability: 0.08 }, effects: [{ targetId: "revenue", operation: "multiply", value: 1.5, persistent: false }] },
-      { id: "evt-supply", name: "Supply chain disruption", trigger: { kind: "bernoulli", probability: 0.03 }, effects: [{ targetId: "revenue", operation: "multiply", value: 0.7, persistent: false }] },
-    ],
-    constraints: [],
+    startingCash: 200_000,
+    variables,
     goals: [
-      { id: "goal-margin", metric: "profit", direction: "at_least", threshold: 0, byPeriod: 12, allPeriods: false },
+      { id: "goal-profit", metric: "profit", direction: "at_least", threshold: 0, byPeriod: 12, allPeriods: false },
       { id: "goal-cash", metric: "cash", direction: "at_least", threshold: 0, byPeriod: 24, allPeriods: true },
     ],
-    startingCash: 200_000,
-    paymentTerms: { dso: 5, dpo: 30, dio: 15, billingFrequency: "monthly" },
-    scalingCosts: [], fixedAssets: [], debtFacilities: [],
     businessProfile: { archetype: "ecommerce", stage: "early", answers },
-    taxRate: 0,
-    customVariables: [],
-    causalLinks: [],
-    nodePositions: {},
   };
 }
 
@@ -357,10 +320,35 @@ function generateEcommerce(answers: Answers): Scenario {
 function generateWholesale(answers: Answers): Scenario {
   const orderSize = num(answers, "avg_order_size", 5000);
   const marginPct = num(answers, "gross_margin_pct", 0.15);
-  const dso = num(answers, "payment_terms_days", 45);
   const monthlyOrders = num(answers, "monthly_orders", 500);
   const warehouseCap = num(answers, "warehouse_capacity", 2000);
   const employees = num(answers, "total_employees", 15);
+
+  const variables: ModelVariable[] = [
+    input("order_size", "Average order size", orderSize, { group: "revenue", valueType: "currency", min: 100, max: orderSize * 5, step: 100 }),
+    input("monthly_orders", "Monthly orders", monthlyOrders, {
+      group: "growth", valueType: "count", min: 10, max: warehouseCap, step: 10,
+      distribution: { kind: "normal", params: { mean: monthlyOrders, stddev: monthlyOrders * 0.15 } },
+    }),
+    input("margin_pct", "Gross margin %", marginPct, { group: "revenue", valueType: "percent", min: 0.03, max: 0.5, step: 0.01 }),
+    input("warehouse_cap", "Warehouse capacity", warehouseCap, { group: "costs", valueType: "count", min: 50, max: warehouseCap * 3, step: 50 }),
+    input("warehouse_cost", "Monthly warehouse cost", 15000, { group: "costs", valueType: "currency", min: 2000, max: 50000, step: 1000 }),
+    input("team_size", "Team size", employees, { group: "costs", valueType: "count", min: 1, max: 50, step: 1 }),
+    input("avg_salary", "Avg monthly salary", 5500, { group: "costs", valueType: "currency", min: 3000, max: 12000, step: 500 }),
+    // Risk
+    input("price_drop", "Market price drop", 0, { group: "risk", isLever: false, distribution: { kind: "bernoulli", params: { p: 0.04 } } }),
+    input("big_order", "Large contract win", 0, { group: "risk", isLever: false, distribution: { kind: "bernoulli", params: { p: 0.05 } } }),
+    // Formulas
+    formula("capped_orders", "Fulfilled orders", "min(monthly_orders, warehouse_cap)", { group: "growth", valueType: "count", chartMetric: "customers" }),
+    formula("gross_revenue", "Gross revenue", "capped_orders * order_size", { group: "revenue", valueType: "currency" }),
+    formula("event_adj", "Event adjustment", "1 - price_drop * 0.15 + big_order * 0.2", { group: "risk", valueType: "ratio" }),
+    formula("revenue", "Revenue", "gross_revenue * event_adj", { group: "revenue", valueType: "currency", chartMetric: "revenue" }),
+    formula("cogs", "Cost of goods", "revenue * (1 - margin_pct)", { group: "costs", valueType: "currency" }),
+    formula("payroll", "Payroll", "team_size * avg_salary * 1.25", { group: "costs", valueType: "currency" }),
+    formula("total_costs", "Total costs", "cogs + payroll + warehouse_cost", { group: "costs", valueType: "currency" }),
+    formula("profit", "Profit", "revenue - total_costs", { group: "revenue", valueType: "currency", chartMetric: "profit" }),
+    formula("cash", "Cash", "prev.cash + profit", { group: "revenue", valueType: "currency", chartMetric: "cash", initialValue: 500_000 }),
+  ];
 
   return {
     id: "profiler-wholesale",
@@ -368,67 +356,13 @@ function generateWholesale(answers: Answers): Scenario {
     horizonPeriods: 36,
     timeStep: "month",
     currency: "AUD",
-    products: [{
-      id: "prod-1", name: "Traded Goods",
-      price: mkVar("price", "Average order size", orderSize),
-      unitCogs: mkVar("cogs", "Cost of goods (landed)", orderSize * (1 - marginPct)),
-      launchPeriod: 0,
-    }],
-    channels: [{
-      id: "ch-sales", name: "Sales team", channelType: "direct",
-      capacityPerPeriod: mkVar("ch-cap", "Monthly order capacity", warehouseCap),
-      conversionRate: mkVar("ch-conv", "Win rate", 0.6, {
-        kind: "stochastic", distribution: "normal",
-        distributionParams: { mean: 0.6, stddev: 0.08 },
-      }),
-      fixedCost: mkVar("ch-fixed", "Warehouse costs", 15000),
-      variableCostPct: mkVar("ch-var", "Logistics %", 0.03),
-      rampCurve: [0.7, 0.9, 1],
-    }],
-    stores: [],
-    segments: [{
-      id: "seg-1", name: "Trade Customers",
-      tam: mkVar("tam", "Addressable customers", 2000),
-      ourShare: mkVar("share", "Active customers", Math.round(monthlyOrders / 3)),
-      churnRate: mkVar("churn", "Customer attrition rate", 0.03),
-      acv: mkVar("acv", "Annual customer value", orderSize * 12),
-    }],
-    salesRoles: [{
-      id: "sr-sales", name: "Sales Rep", count: Math.max(2, Math.floor(employees * 0.3)),
-      fullyLoadedCost: mkVar("sr-cost", "Sales rep cost", 8000),
-      rampCurve: [0.5, 0.75, 1],
-      quota: mkVar("sr-quota", "Orders per month", 30),
-      quotaHitProbability: mkVar("sr-hit", "Quota hit probability", 0.65, {
-        kind: "stochastic", distribution: "normal",
-        distributionParams: { mean: 0.65, stddev: 0.1 },
-      }),
-      attritionProbPerPeriod: mkVar("sr-attr", "Monthly attrition", 0.03),
-    }],
-    adChannels: [],
-    otherHeadcount: [
-      { id: "hc-warehouse", name: "Warehouse staff", count: Math.max(3, Math.floor(employees * 0.4)), salary: mkVar("wh-salary", "Warehouse salary", 4500), onCostsMultiplier: 1.2, rampMonths: 0, attritionProbPerPeriod: 0.05, recruitmentCostPerHire: 800 },
-      { id: "hc-admin", name: "Admin & Finance", count: Math.max(2, Math.ceil(employees * 0.15)), salary: mkVar("admin-salary", "Admin salary", 5500), onCostsMultiplier: 1.3, rampMonths: 1, attritionProbPerPeriod: 0.03, recruitmentCostPerHire: 2000 },
-    ],
-    events: [
-      { id: "evt-price-drop", name: "Market price drop", trigger: { kind: "bernoulli", probability: 0.04 }, effects: [{ targetId: "revenue", operation: "multiply", value: 0.85, persistent: false }] },
-      { id: "evt-big-order", name: "Large contract win", trigger: { kind: "bernoulli", probability: 0.05 }, effects: [{ targetId: "revenue", operation: "add", value: orderSize * 5, persistent: false }] },
-    ],
-    constraints: [{
-      id: "c-warehouse", targetId: "revenue",
-      capValue: warehouseCap * orderSize, capKind: "hard",
-    }],
+    startingCash: 500_000,
+    variables,
     goals: [
       { id: "goal-profit", metric: "profit", direction: "at_least", threshold: 0, byPeriod: 12, allPeriods: false },
       { id: "goal-cash", metric: "cash", direction: "at_least", threshold: 0, byPeriod: 36, allPeriods: true },
     ],
-    startingCash: 500_000,
-    paymentTerms: { dso, dpo: 30, dio: 60, billingFrequency: "monthly" },
-    scalingCosts: [], fixedAssets: [], debtFacilities: [],
     businessProfile: { archetype: "wholesale", stage: "early", answers },
-    taxRate: 0,
-    customVariables: [],
-    causalLinks: [],
-    nodePositions: {},
   };
 }
 
@@ -441,73 +375,48 @@ function generateServices(answers: Answers): Scenario {
   const consultantSalary = num(answers, "consultant_salary", 8000);
   const salesHC = num(answers, "sales_headcount", 2);
 
-  const monthlyRevPerConsultant = dailyRate * 22 * utilisation;
-  const monthlyRevTarget = monthlyRevPerConsultant * consultants;
+  const variables: ModelVariable[] = [
+    input("consultants", "Billable consultants", consultants, { group: "revenue", valueType: "count", min: 1, max: 100, step: 1 }),
+    input("daily_rate", "Daily billing rate", dailyRate, { group: "revenue", valueType: "currency", min: 100, max: 10000, step: 50 }),
+    input("utilisation", "Utilisation rate", utilisation, {
+      group: "revenue", valueType: "percent", min: 0.3, max: 0.95, step: 0.05,
+      distribution: { kind: "normal", params: { mean: utilisation, stddev: 0.08 } },
+    }),
+    input("consultant_salary", "Consultant monthly salary", consultantSalary, { group: "costs", valueType: "currency", min: 3000, max: 25000, step: 500 }),
+    input("sales_hc", "Sales / BD headcount", salesHC, { group: "costs", valueType: "count", min: 0, max: 20, step: 1 }),
+    input("sales_salary", "Sales salary", 10000, { group: "costs", valueType: "currency", min: 4000, max: 20000, step: 500 }),
+    input("admin_count", "Admin & ops staff", Math.max(1, Math.ceil(consultants / 8)), { group: "costs", valueType: "count", min: 1, max: 20, step: 1 }),
+    input("admin_salary", "Admin salary", 5000, { group: "costs", valueType: "currency", min: 3000, max: 12000, step: 500 }),
+    input("office_cost", "Monthly office cost", 3000, { group: "costs", valueType: "currency", min: 500, max: 20000, step: 500 }),
+    // Risk
+    input("key_quit", "Key consultant quits", 0, { group: "risk", isLever: false, distribution: { kind: "bernoulli", params: { p: 0.04 } } }),
+    input("big_deal", "Large project win", 0, { group: "risk", isLever: false, distribution: { kind: "bernoulli", params: { p: 0.06 } } }),
+    // Formulas
+    formula("billable_days", "Billable days", "consultants * 22 * utilisation", { group: "revenue", valueType: "count", chartMetric: "customers" }),
+    formula("event_adj", "Event adjustment", "1 - key_quit * 0.15 + big_deal * 0.25", { group: "risk", valueType: "ratio" }),
+    formula("revenue", "Revenue", "billable_days * daily_rate * event_adj", { group: "revenue", valueType: "currency", chartMetric: "revenue" }),
+    formula("consultant_payroll", "Consultant payroll", "consultants * consultant_salary * 1.3", { group: "costs", valueType: "currency" }),
+    formula("sales_payroll", "Sales payroll", "sales_hc * sales_salary * 1.3", { group: "costs", valueType: "currency" }),
+    formula("admin_payroll", "Admin payroll", "admin_count * admin_salary * 1.2", { group: "costs", valueType: "currency" }),
+    formula("total_costs", "Total costs", "consultant_payroll + sales_payroll + admin_payroll + office_cost", { group: "costs", valueType: "currency" }),
+    formula("profit", "Profit", "revenue - total_costs", { group: "revenue", valueType: "currency", chartMetric: "profit" }),
+    formula("cash", "Cash", "prev.cash + profit", { group: "revenue", valueType: "currency", chartMetric: "cash", initialValue: 300_000 }),
+  ];
 
+  const monthlyRevTarget = dailyRate * 22 * utilisation * consultants;
   return {
     id: "profiler-services",
     name: "Services Consultancy",
     horizonPeriods: 24,
     timeStep: "month",
     currency: "AUD",
-    products: [{
-      id: "prod-1", name: "Consulting Services",
-      price: mkVar("price", "Daily billing rate", dailyRate),
-      unitCogs: mkVar("cogs", "Direct project costs", dailyRate * 0.05),
-      launchPeriod: 0,
-    }],
-    channels: [{
-      id: "ch-pipeline", name: "Sales pipeline", channelType: "direct",
-      capacityPerPeriod: mkVar("ch-cap", "Monthly billable days", consultants * 22),
-      conversionRate: mkVar("ch-conv", "Utilisation rate", utilisation, {
-        kind: "stochastic", distribution: "normal",
-        distributionParams: { mean: utilisation, stddev: 0.08 },
-      }),
-      fixedCost: mkVar("ch-fixed", "Office costs", 3000),
-      variableCostPct: mkVar("ch-var", "Project expenses %", 0.02),
-      rampCurve: [0.6, 0.8, 1],
-    }],
-    stores: [],
-    segments: [{
-      id: "seg-1", name: "Clients",
-      tam: mkVar("tam", "Addressable clients", 500),
-      ourShare: mkVar("share", "Active clients", Math.max(5, Math.ceil(consultants * 1.5))),
-      churnRate: mkVar("churn", "Client attrition rate", 0.04),
-      acv: mkVar("acv", "Annual client value", monthlyRevPerConsultant * 3 * 12 / consultants),
-    }],
-    salesRoles: salesHC > 0 ? [{
-      id: "sr-bd", name: "Business Development", count: salesHC,
-      fullyLoadedCost: mkVar("bd-cost", "BD fully loaded cost", 10000),
-      rampCurve: [0.3, 0.6, 1],
-      quota: mkVar("bd-quota", "New projects per month", 3),
-      quotaHitProbability: mkVar("bd-hit", "Quota hit probability", 0.6, {
-        kind: "stochastic", distribution: "normal",
-        distributionParams: { mean: 0.6, stddev: 0.12 },
-      }),
-      attritionProbPerPeriod: mkVar("bd-attr", "Monthly attrition", 0.02),
-    }] : [],
-    adChannels: [],
-    otherHeadcount: [
-      { id: "hc-consultants", name: "Consultants", count: consultants, salary: mkVar("consult-salary", "Consultant salary", consultantSalary), onCostsMultiplier: 1.3, rampMonths: 1, attritionProbPerPeriod: 0.04, recruitmentCostPerHire: 5000 },
-      { id: "hc-admin", name: "Admin & Operations", count: Math.max(1, Math.ceil(consultants / 8)), salary: mkVar("admin-salary", "Admin salary", 5000), onCostsMultiplier: 1.2, rampMonths: 0, attritionProbPerPeriod: 0.03, recruitmentCostPerHire: 2000 },
-    ],
-    events: [
-      { id: "evt-key-quit", name: "Key consultant quits", trigger: { kind: "bernoulli", probability: 0.04 }, effects: [{ targetId: "revenue", operation: "add", value: -monthlyRevPerConsultant, persistent: false }] },
-      { id: "evt-big-deal", name: "Large project win", trigger: { kind: "bernoulli", probability: 0.06 }, effects: [{ targetId: "revenue", operation: "add", value: monthlyRevPerConsultant * 2, persistent: false }] },
-    ],
-    constraints: [],
+    startingCash: 300_000,
+    variables,
     goals: [
       { id: "goal-rev", metric: "revenue", direction: "at_least", threshold: monthlyRevTarget * 1.2, byPeriod: 24, allPeriods: false },
       { id: "goal-cash", metric: "cash", direction: "at_least", threshold: 0, byPeriod: 24, allPeriods: true },
     ],
-    startingCash: 300_000,
-    paymentTerms: { dso: 30, dpo: 0, dio: 0, billingFrequency: "monthly" },
-    scalingCosts: [], fixedAssets: [], debtFacilities: [],
     businessProfile: { archetype: "services", stage: "early", answers },
-    taxRate: 0,
-    customVariables: [],
-    causalLinks: [],
-    nodePositions: {},
   };
 }
 
@@ -522,7 +431,36 @@ function generateMarketplace(answers: Answers): Scenario {
   const employees = num(answers, "total_employees", 8);
 
   const monthlyTransactions = Math.min(sellers * 5, buyers * 0.8);
-  const monthlyGMV = monthlyTransactions * avgTransaction;
+
+  const variables: ModelVariable[] = [
+    input("sellers", "Active sellers", sellers, {
+      group: "growth", valueType: "count", min: 10, max: sellers * 10, step: 10,
+      distribution: { kind: "normal", params: { mean: sellers, stddev: sellers * 0.1 } },
+    }),
+    input("buyers", "Active buyers", buyers, {
+      group: "growth", valueType: "count", min: 50, max: buyers * 10, step: 50,
+      distribution: { kind: "normal", params: { mean: buyers, stddev: buyers * 0.1 } },
+    }),
+    input("avg_transaction", "Avg transaction value", avgTransaction, { group: "revenue", valueType: "currency", min: 1, max: avgTransaction * 5, step: 1 }),
+    input("take_rate", "Platform take rate", takeRate, { group: "revenue", valueType: "percent", min: 0.01, max: 0.5, step: 0.01 }),
+    input("ad_spend", "Monthly marketing spend", adSpend, { group: "costs", valueType: "currency", min: 0, max: adSpend * 5, step: 500 }),
+    input("team_size", "Team size", employees, { group: "costs", valueType: "count", min: 1, max: 50, step: 1 }),
+    input("avg_salary", "Avg salary", 8000, { group: "costs", valueType: "currency", min: 3000, max: 20000, step: 500 }),
+    input("platform_cost", "Platform infrastructure", 3000, { group: "costs", valueType: "currency", min: 500, max: 20000, step: 500 }),
+    // Risk
+    input("platform_outage", "Platform outage", 0, { group: "risk", isLever: false, distribution: { kind: "bernoulli", params: { p: 0.02 } } }),
+    input("viral_spike", "Viral growth spike", 0, { group: "risk", isLever: false, distribution: { kind: "bernoulli", params: { p: 0.04 } } }),
+    // Formulas
+    formula("transactions", "Monthly transactions", "min(sellers * 5, buyers * 0.8)", { group: "growth", valueType: "count", chartMetric: "customers" }),
+    formula("gmv", "Gross merchandise value", "transactions * avg_transaction", { group: "revenue", valueType: "currency" }),
+    formula("event_adj", "Event adjustment", "1 - platform_outage * 0.4 + viral_spike * 0.4", { group: "risk", valueType: "ratio" }),
+    formula("revenue", "Revenue (take)", "gmv * take_rate * event_adj", { group: "revenue", valueType: "currency", chartMetric: "revenue" }),
+    formula("platform_cogs", "Platform COGS", "revenue * 0.15", { group: "costs", valueType: "currency" }),
+    formula("payroll", "Payroll", "team_size * avg_salary * 1.3", { group: "costs", valueType: "currency" }),
+    formula("total_costs", "Total costs", "platform_cogs + payroll + ad_spend + platform_cost", { group: "costs", valueType: "currency" }),
+    formula("profit", "Profit", "revenue - total_costs", { group: "revenue", valueType: "currency", chartMetric: "profit" }),
+    formula("cash", "Cash", "prev.cash + profit", { group: "revenue", valueType: "currency", chartMetric: "cash", initialValue: 400_000 }),
+  ];
 
   return {
     id: "profiler-marketplace",
@@ -530,73 +468,13 @@ function generateMarketplace(answers: Answers): Scenario {
     horizonPeriods: 24,
     timeStep: "month",
     currency: "AUD",
-    products: [{
-      id: "prod-platform", name: "Platform",
-      price: mkVar("price", "Average transaction value", avgTransaction * takeRate),
-      unitCogs: mkVar("cogs", "Platform cost per transaction", avgTransaction * takeRate * 0.15),
-      launchPeriod: 0,
-    }],
-    channels: [{
-      id: "ch-organic", name: "Organic & referral", channelType: "online",
-      capacityPerPeriod: mkVar("ch-cap", "Monthly potential transactions", monthlyTransactions * 2),
-      conversionRate: mkVar("ch-conv", "Transaction conversion", 0.5, {
-        kind: "stochastic", distribution: "normal",
-        distributionParams: { mean: 0.5, stddev: 0.08 },
-      }),
-      fixedCost: mkVar("ch-fixed", "Platform infrastructure", 3000),
-      variableCostPct: mkVar("ch-var", "Payment processing %", 0.025),
-      rampCurve: [0.4, 0.6, 0.8, 1],
-    }],
-    stores: [],
-    segments: [
-      {
-        id: "seg-sellers", name: "Sellers",
-        tam: mkVar("tam-sellers", "Addressable sellers", sellers * 20),
-        ourShare: mkVar("share-sellers", "Active sellers", sellers),
-        churnRate: mkVar("churn-sellers", "Seller churn rate", 0.06, {
-          kind: "stochastic", distribution: "normal",
-          distributionParams: { mean: 0.06, stddev: 0.02 },
-        }),
-        acv: mkVar("acv-sellers", "Annual seller value", monthlyGMV / sellers * takeRate * 12),
-      },
-      {
-        id: "seg-buyers", name: "Buyers",
-        tam: mkVar("tam-buyers", "Addressable buyers", buyers * 10),
-        ourShare: mkVar("share-buyers", "Active buyers", buyers),
-        churnRate: mkVar("churn-buyers", "Buyer churn rate", 0.08),
-        acv: mkVar("acv-buyers", "Annual buyer value", monthlyGMV / buyers * takeRate * 12),
-      },
-    ],
-    salesRoles: [],
-    adChannels: adSpend > 0 ? [{
-      id: "ad-1", name: "Growth Marketing",
-      spend: mkVar("ad-spend", "Monthly marketing spend", adSpend),
-      cac: mkVar("ad-cac", "Cost per new user", adSpend / (sellers + buyers) * 10, {
-        kind: "stochastic", distribution: "normal",
-        distributionParams: { mean: adSpend / (sellers + buyers) * 10, stddev: 5 },
-      }),
-    }] : [],
-    otherHeadcount: [
-      { id: "hc-eng", name: "Engineering", count: Math.max(2, Math.floor(employees * 0.5)), salary: mkVar("eng-salary", "Engineer salary", 10000), onCostsMultiplier: 1.3, rampMonths: 2, attritionProbPerPeriod: 0.03, recruitmentCostPerHire: 8000 },
-      { id: "hc-ops", name: "Operations & Support", count: Math.max(1, Math.ceil(employees * 0.3)), salary: mkVar("ops-salary", "Ops salary", 5500), onCostsMultiplier: 1.2, rampMonths: 1, attritionProbPerPeriod: 0.04, recruitmentCostPerHire: 2000 },
-    ],
-    events: [
-      { id: "evt-outage", name: "Platform outage", trigger: { kind: "bernoulli", probability: 0.02 }, effects: [{ targetId: "revenue", operation: "multiply", value: 0.6, persistent: false }] },
-      { id: "evt-viral", name: "Viral growth spike", trigger: { kind: "bernoulli", probability: 0.04 }, effects: [{ targetId: "revenue", operation: "multiply", value: 1.4, persistent: false }] },
-    ],
-    constraints: [],
+    startingCash: 400_000,
+    variables,
     goals: [
-      { id: "goal-gmv", metric: "revenue", direction: "at_least", threshold: monthlyGMV * takeRate * 3, byPeriod: 24, allPeriods: false },
+      { id: "goal-gmv", metric: "revenue", direction: "at_least", threshold: monthlyTransactions * avgTransaction * takeRate * 3, byPeriod: 24, allPeriods: false },
       { id: "goal-cash", metric: "cash", direction: "at_least", threshold: 0, byPeriod: 24, allPeriods: true },
     ],
-    startingCash: 400_000,
-    paymentTerms: { dso: 5, dpo: 3, dio: 0, billingFrequency: "monthly" },
-    scalingCosts: [], fixedAssets: [], debtFacilities: [],
     businessProfile: { archetype: "marketplace", stage: "early", answers },
-    taxRate: 0,
-    customVariables: [],
-    causalLinks: [],
-    nodePositions: {},
   };
 }
 
@@ -611,7 +489,34 @@ function generateManufacturing(answers: Answers): Scenario {
   const equipmentCost = num(answers, "equipment_cost", 500000);
   const employees = num(answers, "total_employees", 25);
 
-  const currentUnits = Math.round(capacity * utilisation);
+  const variables: ModelVariable[] = [
+    input("unit_price", "Unit selling price", unitPrice, { group: "revenue", valueType: "currency", min: 1, max: unitPrice * 5, step: 0.5 }),
+    input("unit_cost", "Unit production cost", unitCost, { group: "costs", valueType: "currency", min: 0.5, max: unitPrice, step: 0.5 }),
+    input("capacity", "Monthly capacity (units)", capacity * facilities, { group: "revenue", valueType: "count", min: 100, max: capacity * facilities * 3, step: 100 }),
+    input("utilisation", "Capacity utilisation", utilisation, {
+      group: "revenue", valueType: "percent", min: 0.1, max: 1, step: 0.05,
+      distribution: { kind: "normal", params: { mean: utilisation, stddev: 0.08 } },
+    }),
+    input("prod_workers", "Production workers", Math.max(5, Math.floor(employees * 0.6)), { group: "costs", valueType: "count", min: 1, max: 200, step: 1 }),
+    input("prod_wage", "Production worker wage", 4500, { group: "costs", valueType: "currency", min: 2000, max: 10000, step: 250 }),
+    input("overhead_staff", "Overhead staff", Math.max(3, Math.ceil(employees * 0.25)), { group: "costs", valueType: "count", min: 1, max: 50, step: 1 }),
+    input("overhead_salary", "Overhead salary", 6000, { group: "costs", valueType: "currency", min: 3000, max: 15000, step: 500 }),
+    input("facility_cost", "Facility operating cost", 25000 * facilities, { group: "costs", valueType: "currency", min: 5000, max: 100000, step: 5000 }),
+    input("depreciation", "Monthly depreciation", Math.round(equipmentCost / 120), { group: "costs", valueType: "currency", min: 0, max: 50000, step: 500 }),
+    // Risk
+    input("breakdown", "Equipment breakdown", 0, { group: "risk", isLever: false, distribution: { kind: "bernoulli", params: { p: 0.03 } } }),
+    input("quality_issue", "Quality issue / recall", 0, { group: "risk", isLever: false, distribution: { kind: "bernoulli", params: { p: 0.02 } } }),
+    // Formulas
+    formula("units_produced", "Units produced", "capacity * utilisation", { group: "revenue", valueType: "count", chartMetric: "customers" }),
+    formula("event_adj", "Event adjustment", "1 - breakdown * 0.3 - quality_issue * 0.2", { group: "risk", valueType: "ratio" }),
+    formula("revenue", "Revenue", "units_produced * unit_price * event_adj", { group: "revenue", valueType: "currency", chartMetric: "revenue" }),
+    formula("cogs", "Cost of goods", "units_produced * unit_cost", { group: "costs", valueType: "currency" }),
+    formula("prod_payroll", "Production payroll", "prod_workers * prod_wage * 1.2", { group: "costs", valueType: "currency" }),
+    formula("overhead_payroll", "Overhead payroll", "overhead_staff * overhead_salary * 1.3", { group: "costs", valueType: "currency" }),
+    formula("total_costs", "Total costs", "cogs + prod_payroll + overhead_payroll + facility_cost + depreciation", { group: "costs", valueType: "currency" }),
+    formula("profit", "Profit", "revenue - total_costs", { group: "revenue", valueType: "currency", chartMetric: "profit" }),
+    formula("cash", "Cash", "prev.cash + profit", { group: "revenue", valueType: "currency", chartMetric: "cash", initialValue: 300_000 + equipmentCost * 0.3 }),
+  ];
 
   return {
     id: "profiler-manufacturing",
@@ -619,82 +524,13 @@ function generateManufacturing(answers: Answers): Scenario {
     horizonPeriods: 36,
     timeStep: "month",
     currency: "AUD",
-    products: [{
-      id: "prod-1", name: "Manufactured Product",
-      price: mkVar("price", "Unit selling price", unitPrice),
-      unitCogs: mkVar("cogs", "Unit production cost", unitCost),
-      launchPeriod: 0,
-    }],
-    channels: [{
-      id: "ch-sales", name: "B2B Sales", channelType: "direct",
-      capacityPerPeriod: mkVar("ch-cap", "Monthly production capacity", capacity * facilities),
-      conversionRate: mkVar("ch-conv", "Capacity utilisation", utilisation, {
-        kind: "stochastic", distribution: "normal",
-        distributionParams: { mean: utilisation, stddev: 0.08 },
-      }),
-      fixedCost: mkVar("ch-fixed", "Sales office costs", 5000),
-      variableCostPct: mkVar("ch-var", "Freight & handling %", 0.04),
-      rampCurve: [0.7, 0.85, 1],
-    }],
-    stores: [{
-      id: "facility-1", name: "Production Facility", count: facilities,
-      fixedCostPerUnit: mkVar("facility-cost", "Facility operating cost", 25000),
-      revenueCapPerUnit: mkVar("facility-cap", "Facility revenue cap", capacity * unitPrice),
-      rampCurve: [0.5, 0.75, 0.9, 1],
-      openingSchedule: [],
-    }],
-    segments: [{
-      id: "seg-1", name: "B2B Customers",
-      tam: mkVar("tam", "Addressable market (units/mo)", capacity * 3),
-      ourShare: mkVar("share", "Current customers", Math.ceil(currentUnits / 100)),
-      churnRate: mkVar("churn", "Customer attrition rate", 0.03),
-      acv: mkVar("acv", "Annual customer value", unitPrice * 100 * 12),
-    }],
-    salesRoles: [{
-      id: "sr-sales", name: "Sales Rep", count: Math.max(1, Math.ceil(employees * 0.12)),
-      fullyLoadedCost: mkVar("sr-cost", "Sales rep cost", 8000),
-      rampCurve: [0.5, 0.75, 1],
-      quota: mkVar("sr-quota", "Monthly units sold", Math.round(capacity / 3)),
-      quotaHitProbability: mkVar("sr-hit", "Quota hit", 0.6, {
-        kind: "stochastic", distribution: "normal",
-        distributionParams: { mean: 0.6, stddev: 0.1 },
-      }),
-      attritionProbPerPeriod: mkVar("sr-attr", "Monthly attrition", 0.02),
-    }],
-    adChannels: [],
-    otherHeadcount: [
-      { id: "hc-production", name: "Production workers", count: Math.max(5, Math.floor(employees * 0.6)), salary: mkVar("prod-salary", "Production worker salary", 4500), onCostsMultiplier: 1.2, rampMonths: 1, attritionProbPerPeriod: 0.04, recruitmentCostPerHire: 1500 },
-      { id: "hc-maintenance", name: "Maintenance & QA", count: Math.max(2, Math.ceil(employees * 0.15)), salary: mkVar("maint-salary", "Maintenance salary", 5500), onCostsMultiplier: 1.2, rampMonths: 1, attritionProbPerPeriod: 0.03, recruitmentCostPerHire: 2000 },
-      { id: "hc-admin", name: "Admin & Management", count: Math.max(2, Math.ceil(employees * 0.12)), salary: mkVar("admin-salary", "Admin salary", 6500), onCostsMultiplier: 1.3, rampMonths: 0, attritionProbPerPeriod: 0.02, recruitmentCostPerHire: 3000 },
-    ],
-    events: [
-      { id: "evt-breakdown", name: "Equipment breakdown", trigger: { kind: "bernoulli", probability: 0.03 }, effects: [{ targetId: "revenue", operation: "multiply", value: 0.7, persistent: false }] },
-      { id: "evt-quality", name: "Quality issue / recall", trigger: { kind: "bernoulli", probability: 0.02 }, effects: [{ targetId: "revenue", operation: "add", value: -(currentUnits * unitPrice * 0.2), persistent: false }] },
-    ],
-    constraints: [{
-      id: "c-capacity", targetId: "revenue",
-      capValue: capacity * facilities * unitPrice, capKind: "hard",
-    }],
+    startingCash: 300_000 + equipmentCost * 0.3,
+    variables,
     goals: [
-      { id: "goal-cost", metric: "profit", direction: "at_least", threshold: 0, byPeriod: 12, allPeriods: false },
+      { id: "goal-profit", metric: "profit", direction: "at_least", threshold: 0, byPeriod: 12, allPeriods: false },
       { id: "goal-cash", metric: "cash", direction: "at_least", threshold: 0, byPeriod: 36, allPeriods: true },
     ],
-    startingCash: 300_000 + equipmentCost * 0.3,
-    paymentTerms: { dso: 30, dpo: 30, dio: 45, billingFrequency: "monthly" },
-    scalingCosts: [],
-    fixedAssets: [{
-      id: "fa-equipment", name: "Production Equipment",
-      purchaseCost: mkVar("equip-cost", "Equipment cost", equipmentCost),
-      usefulLifeMonths: 120,
-      depreciationMethod: "straight_line",
-      purchaseSchedule: [[0, 1]],
-    }],
-    debtFacilities: [],
     businessProfile: { archetype: "manufacturing", stage: "early", answers },
-    taxRate: 0,
-    customVariables: [],
-    causalLinks: [],
-    nodePositions: {},
   };
 }
 

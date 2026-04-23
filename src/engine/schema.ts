@@ -1,18 +1,6 @@
 import { z } from "zod";
 
-// ─── Variable kinds ───────────────────────────────────────────────
-
-export const VariableKind = z.enum([
-  "constant",
-  "linear_trend",
-  "exponential",
-  "step",
-  "seasonal",
-  "stochastic",
-  "piecewise",
-  "elasticity",
-  "formula",
-]);
+// ─── Distribution (for stochastic inputs) ────────────────────────
 
 export const DistributionKind = z.enum([
   "normal",
@@ -21,12 +9,21 @@ export const DistributionKind = z.enum([
   "triangular",
   "bernoulli",
 ]);
+export type DistributionKind = z.infer<typeof DistributionKind>;
+
+export const Distribution = z.object({
+  kind: DistributionKind,
+  params: z.record(z.string(), z.number()),
+});
+export type Distribution = z.infer<typeof Distribution>;
+
+// ─── Variable groups and value types ────────────────────────────
 
 export const VariableGroup = z.enum([
   "revenue",
-  "sales_marketing",
-  "operations",
-  "finance",
+  "growth",
+  "costs",
+  "risk",
 ]);
 export type VariableGroup = z.infer<typeof VariableGroup>;
 
@@ -34,155 +31,43 @@ export const ValueType = z.enum([
   "currency",
   "percent",
   "count",
-  "days",
   "ratio",
 ]);
 export type ValueType = z.infer<typeof ValueType>;
 
-export const Variable = z.object({
+// ─── The single ModelVariable type ──────────────────────────────
+
+export const ModelVariable = z.object({
   id: z.string(),
   name: z.string(),
-  kind: VariableKind,
-  baseValue: z.number(),
-  rate: z.number().optional(),
-  changeAt: z.number().int().optional(),
-  newValue: z.number().optional(),
-  amplitude: z.number().optional(),
-  period: z.number().int().optional(),
-  distribution: DistributionKind.optional(),
-  distributionParams: z.record(z.string(), z.number()).optional(),
-  series: z.array(z.number()).optional(),
-  expression: z.string().optional(),
-  dependencies: z.array(z.string()).optional(),
-  resampleEachPeriod: z.boolean().default(true),
+  kind: z.enum(["input", "formula"]),
+
+  // Input fields
+  baseValue: z.number().optional(),
+  min: z.number().optional(),
+  max: z.number().optional(),
+  step: z.number().optional(),
+  distribution: Distribution.optional(),
+
+  // Formula fields
+  formula: z.string().optional(),
+  initialValue: z.number().optional(),
+
+  // Display
   group: VariableGroup.optional(),
   valueType: ValueType.optional(),
+
+  // Chart integration
+  chartMetric: z
+    .enum(["revenue", "cash", "customers", "profit"])
+    .optional(),
+
+  // Lever visibility
+  isLever: z.boolean().default(true),
 });
-export type Variable = z.infer<typeof Variable>;
+export type ModelVariable = z.infer<typeof ModelVariable>;
 
-// ─── Constraint ───────────────────────────────────────────────────
-
-export const Constraint = z.object({
-  id: z.string(),
-  targetId: z.string(),
-  capValue: z.union([z.number(), z.string()]),
-  capKind: z.enum(["hard", "soft"]).default("hard"),
-});
-
-// ─── Primitives ───────────────────────────────────────────────────
-
-export const Product = z.object({
-  id: z.string(),
-  name: z.string(),
-  price: Variable,
-  unitCogs: Variable,
-  elasticity: z.number().optional(),
-  launchPeriod: z.number().int().default(0),
-});
-
-export const Channel = z.object({
-  id: z.string(),
-  name: z.string(),
-  channelType: z.enum(["direct", "retail", "online", "wholesale", "partner"]),
-  capacityPerPeriod: Variable,
-  conversionRate: Variable,
-  fixedCost: Variable,
-  variableCostPct: Variable,
-  rampCurve: z.array(z.number()).default([1]),
-});
-
-export const Store = z.object({
-  id: z.string(),
-  name: z.string(),
-  count: z.number().int(),
-  fixedCostPerUnit: Variable,
-  revenueCapPerUnit: Variable,
-  rampCurve: z.array(z.number()).default([0.25, 0.5, 0.75, 1]),
-  openingSchedule: z
-    .array(z.tuple([z.number().int(), z.number().int()]))
-    .default([]),
-});
-
-export const Segment = z.object({
-  id: z.string(),
-  name: z.string(),
-  tam: Variable,
-  ourShare: Variable,
-  churnRate: Variable,
-  acv: Variable,
-});
-
-export const SalesRole = z.object({
-  id: z.string(),
-  name: z.string(),
-  count: z.number().int(),
-  fullyLoadedCost: Variable,
-  rampCurve: z.array(z.number()),
-  quota: Variable,
-  quotaHitProbability: Variable,
-  attritionProbPerPeriod: Variable,
-});
-
-export const AdChannel = z.object({
-  id: z.string(),
-  name: z.string(),
-  spend: Variable,
-  cac: Variable,
-  diminishingReturnsThreshold: Variable.optional(),
-});
-
-export const HeadcountRole = z.object({
-  id: z.string(),
-  name: z.string(),
-  count: z.number().int(),
-  salary: Variable,
-  onCostsMultiplier: z.number().default(1.3),
-  rampMonths: z.number().int().default(0),
-  attritionProbPerPeriod: z.number().default(0),
-  recruitmentCostPerHire: z.number().default(0),
-});
-
-export const PaymentTerms = z.object({
-  dso: z.number().default(0),
-  dpo: z.number().default(0),
-  dio: z.number().default(0),
-  billingFrequency: z
-    .enum(["monthly", "quarterly", "annual", "upfront"])
-    .default("monthly"),
-});
-
-export const ScalingCostTrigger = z.object({
-  id: z.string(),
-  name: z.string(),
-  triggerMetric: z.string(),
-  threshold: z.number(),
-  costType: z.enum(["one_time", "recurring"]),
-  amount: Variable,
-});
-
-export const FixedAsset = z.object({
-  id: z.string(),
-  name: z.string(),
-  purchaseCost: Variable,
-  usefulLifeMonths: z.number().int(),
-  depreciationMethod: z.enum(["straight_line"]).default("straight_line"),
-  purchaseSchedule: z
-    .array(z.tuple([z.number().int(), z.number().int()]))
-    .default([]),
-});
-
-export const DebtFacility = z.object({
-  id: z.string(),
-  name: z.string(),
-  principal: z.number(),
-  interestRate: z.number(),
-  termMonths: z.number().int(),
-  drawdownSchedule: z
-    .array(z.tuple([z.number().int(), z.number()]))
-    .default([]),
-  isRevolving: z.boolean().default(false),
-  revolvingLimit: z.number().optional(),
-});
+// ─── Business profile ───────────────────────────────────────────
 
 export const BusinessProfile = z.object({
   archetype: z.enum([
@@ -196,42 +81,14 @@ export const BusinessProfile = z.object({
     "manufacturing",
   ]),
   stage: z.enum(["idea", "pre_revenue", "early", "growth", "mature"]),
-  answers: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])),
+  answers: z.record(
+    z.string(),
+    z.union([z.string(), z.number(), z.boolean()])
+  ),
 });
+export type BusinessProfile = z.infer<typeof BusinessProfile>;
 
-export const EventTrigger = z.object({
-  kind: z.enum(["bernoulli", "scheduled", "conditional"]),
-  probability: z.number().optional(),
-  period: z.number().int().optional(),
-  condition: z.string().optional(),
-});
-
-export const EventEffect = z.object({
-  targetId: z.string(),
-  operation: z.enum(["set", "add", "multiply"]),
-  value: z.number(),
-  persistent: z.boolean().default(false),
-});
-
-export const Event = z.object({
-  id: z.string(),
-  name: z.string(),
-  trigger: EventTrigger,
-  effects: z.array(EventEffect),
-});
-
-// ─── Causal Links (Meadows-style system dynamics) ────────────────
-
-export const CausalLink = z.object({
-  id: z.string(),
-  sourceId: z.string(),
-  targetId: z.string(),
-  polarity: z.enum(["positive", "negative"]),
-  strength: z.number().default(1.0),
-  delay: z.number().int().default(0),
-  noise: z.number().default(0),
-});
-export type CausalLink = z.infer<typeof CausalLink>;
+// ─── Goal ────────────────────────────────────────────────────────
 
 export const Goal = z.object({
   id: z.string(),
@@ -244,64 +101,33 @@ export const Goal = z.object({
 });
 export type Goal = z.infer<typeof Goal>;
 
+// ─── Scenario ────────────────────────────────────────────────────
+
 export const Scenario = z.object({
   id: z.string(),
   name: z.string(),
-  horizonPeriods: z.number().int().default(36),
+  horizonPeriods: z.number().int().default(24),
   timeStep: z.enum(["month", "quarter"]).default("month"),
   currency: z.string().default("AUD"),
-  products: z.array(Product),
-  channels: z.array(Channel),
-  stores: z.array(Store).default([]),
-  segments: z.array(Segment).default([]),
-  salesRoles: z.array(SalesRole).default([]),
-  adChannels: z.array(AdChannel).default([]),
-  otherHeadcount: z.array(HeadcountRole).default([]),
-  events: z.array(Event).default([]),
-  constraints: z.array(Constraint).default([]),
+
+  variables: z.array(ModelVariable),
   goals: z.array(Goal),
   startingCash: z.number(),
-  paymentTerms: PaymentTerms.default(() => ({
-    dso: 0,
-    dpo: 0,
-    dio: 0,
-    billingFrequency: "monthly" as const,
-  })),
-  scalingCosts: z.array(ScalingCostTrigger).default([]),
-  fixedAssets: z.array(FixedAsset).default([]),
-  debtFacilities: z.array(DebtFacility).default([]),
+
   businessProfile: BusinessProfile.optional(),
-  taxRate: z.number().default(0),
-  customVariables: z.array(Variable).default([]),
-  causalLinks: z.array(CausalLink).default([]),
-  nodePositions: z.record(z.string(), z.object({ x: z.number(), y: z.number() })).default({}),
 });
 export type Scenario = z.infer<typeof Scenario>;
+
+// ─── Monte Carlo Result ──────────────────────────────────────────
 
 export const MonteCarloResult = z.object({
   scenarioId: z.string(),
   nRuns: z.number().int(),
-  percentiles: z.record(z.string(), z.record(z.string(), z.array(z.number()))),
-  winProbability: z.number(),
-  perGoalSuccess: z.record(z.string(), z.number()),
-  bindingConstraints: z.record(z.string(), z.number()),
-  financialStatements: z.object({
-    incomeStatement: z.record(
-      z.string(),
-      z.record(z.string(), z.array(z.number()))
-    ),
-    balanceSheet: z.record(
-      z.string(),
-      z.record(z.string(), z.array(z.number()))
-    ),
-    cashFlowStatement: z.record(
-      z.string(),
-      z.record(z.string(), z.array(z.number()))
-    ),
-  }),
-  unitEconomics: z.record(
+  percentiles: z.record(
     z.string(),
     z.record(z.string(), z.array(z.number()))
   ),
+  winProbability: z.number(),
+  perGoalSuccess: z.record(z.string(), z.number()),
 });
 export type MonteCarloResult = z.infer<typeof MonteCarloResult>;

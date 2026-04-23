@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { makeRng } from "@/engine/core/rng";
-import { simulateRun, allocateBuffers } from "@/engine/simulate";
+import { compileScenario, simulateRun } from "@/engine/simulate";
 import { monteCarlo } from "@/engine/montecarlo";
-import { generateScenario, ARCHETYPE_CONFIGS, getLabel, isHidden } from "@/engine/profiler";
+import { generateScenario, ARCHETYPE_CONFIGS } from "@/engine/profiler";
+import { getGroupLabel } from "@/engine/profiler/vocabulary";
 import { TEMPLATES } from "@/engine/templates";
 import type { Archetype } from "@/engine/profiler";
 
@@ -57,30 +58,43 @@ describe("generateScenario", () => {
         expect(scenario.businessProfile?.archetype).toBe(arch);
       });
 
-      it("has at least one product", () => {
-        expect(scenario.products.length).toBeGreaterThan(0);
-        expect(scenario.products[0].price.baseValue).toBeGreaterThan(0);
+      it("has variables with inputs and formulas", () => {
+        expect(scenario.variables.length).toBeGreaterThan(0);
+        const inputs = scenario.variables.filter((v) => v.kind === "input");
+        const formulas = scenario.variables.filter((v) => v.kind === "formula");
+        expect(inputs.length).toBeGreaterThan(0);
+        expect(formulas.length).toBeGreaterThan(0);
+      });
+
+      it("has chart metric variables for revenue, cash, profit", () => {
+        const chartVars = scenario.variables.filter((v) => v.chartMetric);
+        const chartMetrics = chartVars.map((v) => v.chartMetric);
+        expect(chartMetrics).toContain("revenue");
+        expect(chartMetrics).toContain("cash");
+        expect(chartMetrics).toContain("profit");
       });
 
       it("simulates without NaN", () => {
         const rng = makeRng(42);
-        const buffers = allocateBuffers(scenario.horizonPeriods);
-        simulateRun(scenario, buffers, rng);
+        const compiled = compileScenario(scenario);
+        const result = simulateRun(compiled, rng);
 
-        for (let t = 0; t < scenario.horizonPeriods; t++) {
-          expect(Number.isNaN(buffers.revenue[t])).toBe(false);
-          expect(Number.isNaN(buffers.cash[t])).toBe(false);
-          expect(Number.isFinite(buffers.revenue[t])).toBe(true);
-          expect(Number.isFinite(buffers.cash[t])).toBe(true);
+        for (const [varId, series] of result.series) {
+          for (let t = 0; t < series.length; t++) {
+            expect(Number.isNaN(series[t])).toBe(false);
+            expect(Number.isFinite(series[t])).toBe(true);
+          }
         }
       });
 
       it("produces positive revenue by end of horizon", () => {
         const rng = makeRng(42);
-        const buffers = allocateBuffers(scenario.horizonPeriods);
-        simulateRun(scenario, buffers, rng);
+        const compiled = compileScenario(scenario);
+        const result = simulateRun(compiled, rng);
 
-        const lastRevenue = buffers.revenue[scenario.horizonPeriods - 1];
+        const revSeries = result.series.get("revenue");
+        expect(revSeries).toBeDefined();
+        const lastRevenue = revSeries![scenario.horizonPeriods - 1];
         expect(lastRevenue).toBeGreaterThan(0);
       });
 
@@ -100,57 +114,35 @@ describe("generateScenario", () => {
 describe("templates registry", () => {
   it("has all 8 templates", () => {
     for (const arch of ARCHETYPES) {
-      const key = `${arch}-template`;
-      // Templates use either "archetype-template" or "archetype-startup" naming
-      const found = Object.keys(TEMPLATES).some(
-        (k) => k.startsWith(arch) || TEMPLATES[k]?.businessProfile?.archetype === arch
+      const found = Object.values(TEMPLATES).some(
+        (s) => s.businessProfile?.archetype === arch
       );
       expect(found).toBe(true);
     }
   });
 
   it("all templates simulate without errors", () => {
-    for (const [id, scenario] of Object.entries(TEMPLATES)) {
+    for (const [, scenario] of Object.entries(TEMPLATES)) {
       const rng = makeRng(42);
-      const buffers = allocateBuffers(scenario.horizonPeriods);
-      simulateRun(scenario, buffers, rng);
+      const compiled = compileScenario(scenario);
+      const result = simulateRun(compiled, rng);
 
-      const lastRevenue = buffers.revenue[scenario.horizonPeriods - 1];
+      const revSeries = result.series.get("revenue");
+      expect(revSeries).toBeDefined();
+      const lastRevenue = revSeries![scenario.horizonPeriods - 1];
       expect(lastRevenue).toBeGreaterThan(0);
     }
   });
 });
 
 describe("vocabulary", () => {
-  it("returns archetype-specific label for SaaS", () => {
-    expect(getLabel("saas", "product.price", "Price")).toBe("Monthly subscription price");
-    expect(getLabel("saas", "segment.churnRate", "Churn")).toBe("Monthly churn rate");
+  it("returns group labels for known groups", () => {
+    expect(getGroupLabel("saas", "growth")).toBe("Growth & Acquisition");
+    expect(getGroupLabel("restaurant", "revenue")).toBe("Menu & Pricing");
+    expect(getGroupLabel(undefined, "revenue")).toBe("Revenue");
   });
 
-  it("returns archetype-specific label for restaurant", () => {
-    expect(getLabel("restaurant", "product.price", "Price")).toBe("Average cover price");
-    expect(getLabel("restaurant", "product.unitCogs", "COGS")).toBe("Food cost per cover");
-  });
-
-  it("falls back to default label for unknown field", () => {
-    expect(getLabel("saas", "nonexistent.field", "Fallback")).toBe("Fallback");
-  });
-
-  it("falls back to default when no archetype", () => {
-    expect(getLabel(undefined, "product.price", "Price")).toBe("Price");
-  });
-
-  it("hides restaurant-specific fields", () => {
-    expect(isHidden("restaurant", "segment.churnRate")).toBe(true);
-    expect(isHidden("restaurant", "adChannel.spend")).toBe(true);
-    expect(isHidden("restaurant", "metric.burnMultiple")).toBe(true);
-  });
-
-  it("does not hide SaaS churn", () => {
-    expect(isHidden("saas", "segment.churnRate")).toBe(false);
-  });
-
-  it("returns false for no archetype", () => {
-    expect(isHidden(undefined, "segment.churnRate")).toBe(false);
+  it("falls back to default for unknown group", () => {
+    expect(getGroupLabel("saas", "unknown")).toBe("unknown");
   });
 });

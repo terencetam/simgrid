@@ -2,13 +2,10 @@ import { useScenarioStore } from "@/store/scenario-store";
 import { GoalBar } from "./GoalBar";
 import { LeverPanel } from "./LeverPanel";
 import { MetricStrip } from "./MetricStrip";
-import { EventLog } from "./EventLog";
 import { SimulationChart } from "@/ui/charts/SimulationChart";
 import { FanChart } from "@/ui/charts/FanChart";
-import { FinancialsTab } from "@/ui/financials/FinancialsTab";
-import { UnitEconomicsTab } from "@/ui/unit-economics/UnitEconomicsTab";
 import { TornadoChart } from "@/ui/charts/TornadoChart";
-import { ModelBuilder } from "@/ui/builder/ModelBuilder";
+import { ModelTab } from "@/ui/model/ModelTab";
 import { ScenarioLibrary } from "@/ui/library/ScenarioLibrary";
 import { CompareView } from "@/ui/compare/CompareView";
 import { ARCHETYPE_CONFIGS } from "@/engine/profiler";
@@ -17,32 +14,25 @@ import { exportScenarioJSON } from "@/lib/file-io";
 import { ParentSize } from "@visx/responsive";
 import { useState, useCallback, useMemo, useRef } from "react";
 import { useKeyboardShortcuts, SHORTCUTS } from "@/lib/keyboard";
-import { exportResultsCSV, exportFinancialsCSV } from "@/lib/export-csv";
+import { exportResultsCSV } from "@/lib/export-csv";
 import { exportChartPNG } from "@/lib/export-png";
 import { OnboardingTour } from "@/ui/onboarding/OnboardingTour";
-import { SystemEditor } from "@/ui/system/SystemEditor";
 
-type ViewMode = "chart" | "financials" | "unitEcon" | "sensitivity" | "system" | "model" | "compare";
+type ViewMode = "chart" | "model" | "sensitivity" | "compare";
 type ChartMetric = "revenue" | "cash" | "customers" | "profit";
 
 const VIEW_TABS: { key: ViewMode; label: string }[] = [
   { key: "chart", label: "Chart" },
-  { key: "financials", label: "Financials" },
-  { key: "unitEcon", label: "Unit Econ" },
-  { key: "sensitivity", label: "Sensitivity" },
-  { key: "system", label: "System" },
   { key: "model", label: "Model" },
+  { key: "sensitivity", label: "Sensitivity" },
   { key: "compare", label: "Compare" },
 ];
 
-const CHART_CONFIG: Record<
-  ChartMetric,
-  { label: string; goalMetric?: string }
-> = {
-  revenue: { label: "Revenue", goalMetric: "revenue" },
-  cash: { label: "Cash", goalMetric: "cash" },
-  customers: { label: "Customers" },
-  profit: { label: "Net Income" },
+const CHART_METRIC_LABELS: Record<ChartMetric, string> = {
+  revenue: "Revenue",
+  cash: "Cash",
+  customers: "Customers",
+  profit: "Net Income",
 };
 
 export function Dashboard() {
@@ -56,8 +46,6 @@ export function Dashboard() {
   const animationPhase = useScenarioStore((s) => s.animationPhase);
   const runSimulation = useScenarioStore((s) => s.runSimulation);
   const setAnimationPhase = useScenarioStore((s) => s.setAnimationPhase);
-  const updateVariable = useScenarioStore((s) => s.updateVariable);
-  const updateScenario = useScenarioStore((s) => s.updateScenario);
   const resetToProfiler = useScenarioStore((s) => s.resetToProfiler);
   const isDirty = useScenarioStore((s) => s.isDirty);
   const saveCurrentScenario = useScenarioStore((s) => s.saveCurrentScenario);
@@ -79,10 +67,23 @@ export function Dashboard() {
     setTimeout(() => setToast(null), 2500);
   }, []);
 
-  const chartData = result?.percentiles[activeMetric] ?? {};
-  const cfg = CHART_CONFIG[activeMetric];
+  // Build a map from chartMetric ("revenue"|"cash"|etc.) → variable ID
+  const chartMetricToVarId = useMemo(() => {
+    const map = new Map<ChartMetric, string>();
+    for (const v of scenario.variables) {
+      if (v.chartMetric) {
+        map.set(v.chartMetric as ChartMetric, v.id);
+      }
+    }
+    return map;
+  }, [scenario.variables]);
 
-  const goal = scenario.goals.find((g) => g.metric === cfg.goalMetric);
+  const activeVarId = chartMetricToVarId.get(activeMetric) ?? activeMetric;
+  const chartData = result?.percentiles[activeVarId] ?? {};
+  const metricLabel = CHART_METRIC_LABELS[activeMetric];
+
+  // Find goal threshold for the active metric
+  const goal = scenario.goals.find((g) => g.metric === activeVarId || g.metric === activeMetric);
   const threshold = goal?.threshold;
 
   const handleAnimationComplete = useCallback(() => {
@@ -176,12 +177,9 @@ export function Dashboard() {
       )}
 
       <div className="flex flex-1 min-h-0">
-        {/* Lever panel + event log */}
+        {/* Lever panel */}
         <div className="w-80 border-r border-zinc-800 overflow-y-auto bg-zinc-925 flex flex-col" data-tour="levers">
           <LeverPanel />
-          <div className="border-t border-zinc-800">
-            <EventLog scenario={scenario} />
-          </div>
           <div className="mt-auto border-t border-zinc-800 px-5 py-3">
             <span className="text-[10px] font-mono text-zinc-600">
               {__COMMIT_SHA__}
@@ -211,7 +209,7 @@ export function Dashboard() {
             {viewMode === "chart" && (
               <>
                 <div className="w-px h-4 bg-zinc-800 mx-1" />
-                {(Object.keys(CHART_CONFIG) as ChartMetric[]).map((key) => (
+                {(Object.keys(CHART_METRIC_LABELS) as ChartMetric[]).map((key) => (
                   <button
                     key={key}
                     onClick={() => setActiveMetric(key)}
@@ -221,17 +219,17 @@ export function Dashboard() {
                         : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900"
                     }`}
                   >
-                    {CHART_CONFIG[key].label}
+                    {CHART_METRIC_LABELS[key]}
                   </button>
                 ))}
               </>
             )}
 
             {/* Export buttons */}
-            {result && (viewMode === "chart" || viewMode === "financials") && (
+            {result && viewMode === "chart" && (
               <>
                 <div className="flex-1" />
-                {viewMode === "chart" && chartRef.current && (
+                {chartRef.current && (
                   <button
                     onClick={() => exportChartPNG(chartRef.current!, scenario.name)}
                     className="text-[10px] text-zinc-600 hover:text-zinc-300 transition-colors px-2 py-1"
@@ -240,11 +238,7 @@ export function Dashboard() {
                   </button>
                 )}
                 <button
-                  onClick={() =>
-                    viewMode === "financials"
-                      ? exportFinancialsCSV(result, scenario.name)
-                      : exportResultsCSV(result, scenario.name)
-                  }
+                  onClick={() => exportResultsCSV(result, scenario.name)}
                   className="text-[10px] text-zinc-600 hover:text-zinc-300 transition-colors px-2 py-1"
                 >
                   CSV
@@ -263,10 +257,10 @@ export function Dashboard() {
                       <SimulationChart
                         fanData={chartData}
                         sampleRuns={sampleRuns}
-                        metric={activeMetric}
+                        metricVarId={activeVarId}
                         width={width}
                         height={height}
-                        yLabel={cfg.label}
+                        yLabel={metricLabel}
                         threshold={threshold}
                         phase={animationPhase}
                         onAnimationComplete={handleAnimationComplete}
@@ -281,7 +275,7 @@ export function Dashboard() {
                         data={chartData}
                         width={width}
                         height={height}
-                        yLabel={cfg.label}
+                        yLabel={metricLabel}
                         threshold={threshold}
                       />
                     )}
@@ -315,26 +309,6 @@ export function Dashboard() {
               </>
             )}
 
-            {viewMode === "financials" && (
-              result ? (
-                <FinancialsTab result={result} />
-              ) : (
-                <div className="flex items-center justify-center h-full text-zinc-600 text-sm">
-                  Run a simulation to see financial statements
-                </div>
-              )
-            )}
-
-            {viewMode === "unitEcon" && (
-              result ? (
-                <UnitEconomicsTab result={result} />
-              ) : (
-                <div className="flex items-center justify-center h-full text-zinc-600 text-sm">
-                  Run a simulation to see unit economics
-                </div>
-              )
-            )}
-
             {viewMode === "sensitivity" && (
               sensitivityResult ? (
                 <TornadoChart data={sensitivityResult} />
@@ -354,18 +328,8 @@ export function Dashboard() {
               )
             )}
 
-            {viewMode === "system" && (
-              <div className="h-full">
-                <SystemEditor />
-              </div>
-            )}
-
             {viewMode === "model" && (
-              <ModelBuilder
-                scenario={scenario}
-                onUpdateVariable={updateVariable}
-                onUpdateScenario={updateScenario}
-              />
+              <ModelTab />
             )}
 
             {viewMode === "compare" && (

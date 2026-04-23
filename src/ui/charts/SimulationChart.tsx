@@ -14,8 +14,8 @@ interface SimulationChartProps {
   fanData: Record<string, number[]>;
   /** Individual run traces for spaghetti animation */
   sampleRuns: SampleRun[];
-  /** Which metric to display */
-  metric: "revenue" | "cash" | "customers" | "profit";
+  /** Variable ID to display */
+  metricVarId: string;
   width: number;
   height: number;
   yLabel: string;
@@ -35,7 +35,7 @@ const TRANSITION_DURATION = 600;
 export function SimulationChart({
   fanData,
   sampleRuns,
-  metric,
+  metricVarId,
   width,
   height,
   yLabel,
@@ -54,21 +54,12 @@ export function SimulationChart({
   const innerWidth = width - MARGIN.left - MARGIN.right;
   const innerHeight = height - MARGIN.top - MARGIN.bottom;
 
-  // Get the run data for the current metric
+  // Get the run data for the current metric via variable ID
   const getRunSeries = useCallback(
     (run: SampleRun): number[] => {
-      switch (metric) {
-        case "revenue":
-          return run.revenue;
-        case "cash":
-          return run.cash;
-        case "customers":
-          return run.customers;
-        case "profit":
-          return run.profit;
-      }
+      return run.values[metricVarId] ?? [];
     },
-    [metric]
+    [metricVarId]
   );
 
   // Compute scales based on sample run data
