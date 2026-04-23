@@ -12,13 +12,11 @@ import {
   type Edge,
   type NodeTypes,
   type EdgeTypes,
-  type OnNodesChange,
-  type OnEdgesChange,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
 import { useScenarioStore } from "@/store/scenario-store";
-import { buildSystemGraph, type CausalEdgeData, type SystemNodeData } from "./graph-builder";
+import { buildSystemGraph, type CausalEdgeData } from "./graph-builder";
 import { StockNode } from "./StockNode";
 import { FlowNode } from "./FlowNode";
 import { ConverterNode } from "./ConverterNode";
@@ -82,9 +80,9 @@ export function SystemEditor() {
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [selectedLink, setSelectedLink] = useState<CausalLink | null>(null);
 
-  const handleNodesChange: OnNodesChange<SystemNodeData> = useCallback(
+  const handleNodesChange: typeof onNodesChange = useCallback(
     (changes) => {
-      onNodesChange(changes as Parameters<typeof onNodesChange>[0]);
+      onNodesChange(changes);
 
       // Persist position changes
       const positionUpdates: Record<string, { x: number; y: number }> = {};
@@ -100,9 +98,9 @@ export function SystemEditor() {
     [onNodesChange, updateNodePositions],
   );
 
-  const handleEdgesChange: OnEdgesChange<CausalEdgeData> = useCallback(
+  const handleEdgesChange: typeof onEdgesChange = useCallback(
     (changes) => {
-      onEdgesChange(changes as Parameters<typeof onEdgesChange>[0]);
+      onEdgesChange(changes);
     },
     [onEdgesChange],
   );
