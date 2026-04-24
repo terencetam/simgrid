@@ -53,7 +53,6 @@ describe("URL sharing", () => {
       variables: [
         { id: "v1", name: "Price", kind: "input", baseValue: 10 },
       ],
-      goals: [{ id: "g1", metric: "revenue", direction: "at_least", threshold: 1000, byPeriod: 12 }],
       startingCash: 10000,
     };
     const result = Scenario.safeParse(minimal);
@@ -80,7 +79,6 @@ describe("JSON export/import", () => {
     if (result.success) {
       expect(result.data.id).toBe(saasStartup.id);
       expect(result.data.variables.length).toBe(saasStartup.variables.length);
-      expect(result.data.goals.length).toBe(saasStartup.goals.length);
     }
   });
 

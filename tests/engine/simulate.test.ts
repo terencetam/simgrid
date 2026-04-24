@@ -94,18 +94,11 @@ describe("monteCarlo", () => {
     expect(p50).toBeGreaterThanOrEqual(p10);
   });
 
-  it("computes win probability between 0 and 1", () => {
+  it("computes survival rate between 0 and 1", () => {
     const { result } = monteCarlo(saasStartup, 100, 42);
 
-    expect(result.winProbability).toBeGreaterThanOrEqual(0);
-    expect(result.winProbability).toBeLessThanOrEqual(1);
-  });
-
-  it("returns per-goal success rates", () => {
-    const { result } = monteCarlo(saasStartup, 100, 42);
-
-    // At least one goal should have a success rate
-    expect(Object.keys(result.perGoalSuccess).length).toBeGreaterThan(0);
+    expect(result.survivalRate).toBeGreaterThanOrEqual(0);
+    expect(result.survivalRate).toBeLessThanOrEqual(1);
   });
 
   it("returns sample run traces for spaghetti animation", () => {
@@ -115,10 +108,10 @@ describe("monteCarlo", () => {
     expect(sampleRuns.length).toBeLessThanOrEqual(50);
     expect(sampleRuns.length).toBeGreaterThan(0);
 
-    // Each sample run should have values and won status
+    // Each sample run should have values and survived status
     for (const run of sampleRuns) {
       expect(run.values).toBeDefined();
-      expect(typeof run.won).toBe("boolean");
+      expect(typeof run.survived).toBe("boolean");
       // Should have at least revenue series
       const revenueVals = Object.values(run.values).find(
         (v) => v.length === 24
@@ -139,9 +132,9 @@ describe("monteCarlo", () => {
 describe("sensitivity analysis", () => {
   it("identifies levers and computes impact", () => {
     const { result } = monteCarlo(saasStartup, 100, 42);
-    const tornado = runSensitivity(saasStartup, result.winProbability, 0.1, 100, 42);
+    const tornado = runSensitivity(saasStartup, result.survivalRate, 0.1, 100, 42);
 
-    expect(tornado.baseWinProb).toBe(result.winProbability);
+    expect(tornado.baseSurvivalRate).toBe(result.survivalRate);
     expect(tornado.levers.length).toBeGreaterThan(0);
 
     // Levers should be sorted by impact (descending)

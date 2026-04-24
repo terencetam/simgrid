@@ -122,10 +122,6 @@ function generateSaas(answers: Answers): Scenario {
     currency: "AUD",
     startingCash: 500_000,
     variables,
-    goals: [
-      { id: "goal-arr", metric: "revenue", direction: "at_least", threshold: Math.max(price * 100, 50000), byPeriod: 24, allPeriods: false },
-      { id: "goal-cash", metric: "cash", direction: "at_least", threshold: 0, byPeriod: 24, allPeriods: true },
-    ],
     businessProfile: { archetype: "saas", stage: "early", answers },
   };
 }
@@ -192,10 +188,6 @@ function generateRestaurant(answers: Answers): Scenario {
     currency: "AUD",
     startingCash: 200_000 * locations,
     variables,
-    goals: [
-      { id: "goal-breakeven", metric: "profit", direction: "at_least", threshold: 0, byPeriod: 18, allPeriods: false },
-      { id: "goal-cash", metric: "cash", direction: "at_least", threshold: 0, byPeriod: 24, allPeriods: true },
-    ],
     businessProfile: { archetype: "restaurant", stage: "early", answers },
   };
 }
@@ -250,10 +242,6 @@ function generateRetail(answers: Answers): Scenario {
     currency: "AUD",
     startingCash: 150_000 * stores,
     variables,
-    goals: [
-      { id: "goal-profit", metric: "profit", direction: "at_least", threshold: 0, byPeriod: 18, allPeriods: false },
-      { id: "goal-cash", metric: "cash", direction: "at_least", threshold: 0, byPeriod: 24, allPeriods: true },
-    ],
     businessProfile: { archetype: "retail", stage: "early", answers },
   };
 }
@@ -307,10 +295,6 @@ function generateEcommerce(answers: Answers): Scenario {
     currency: "AUD",
     startingCash: 200_000,
     variables,
-    goals: [
-      { id: "goal-profit", metric: "profit", direction: "at_least", threshold: 0, byPeriod: 12, allPeriods: false },
-      { id: "goal-cash", metric: "cash", direction: "at_least", threshold: 0, byPeriod: 24, allPeriods: true },
-    ],
     businessProfile: { archetype: "ecommerce", stage: "early", answers },
   };
 }
@@ -358,10 +342,6 @@ function generateWholesale(answers: Answers): Scenario {
     currency: "AUD",
     startingCash: 500_000,
     variables,
-    goals: [
-      { id: "goal-profit", metric: "profit", direction: "at_least", threshold: 0, byPeriod: 12, allPeriods: false },
-      { id: "goal-cash", metric: "cash", direction: "at_least", threshold: 0, byPeriod: 36, allPeriods: true },
-    ],
     businessProfile: { archetype: "wholesale", stage: "early", answers },
   };
 }
@@ -403,7 +383,6 @@ function generateServices(answers: Answers): Scenario {
     formula("cash", "Cash", "prev.cash + profit", { group: "revenue", valueType: "currency", chartMetric: "cash", initialValue: 300_000 }),
   ];
 
-  const monthlyRevTarget = dailyRate * 22 * utilisation * consultants;
   return {
     id: "profiler-services",
     name: "Services Consultancy",
@@ -412,10 +391,6 @@ function generateServices(answers: Answers): Scenario {
     currency: "AUD",
     startingCash: 300_000,
     variables,
-    goals: [
-      { id: "goal-rev", metric: "revenue", direction: "at_least", threshold: monthlyRevTarget * 1.2, byPeriod: 24, allPeriods: false },
-      { id: "goal-cash", metric: "cash", direction: "at_least", threshold: 0, byPeriod: 24, allPeriods: true },
-    ],
     businessProfile: { archetype: "services", stage: "early", answers },
   };
 }
@@ -429,8 +404,6 @@ function generateMarketplace(answers: Answers): Scenario {
   const takeRate = num(answers, "take_rate", 0.10);
   const adSpend = num(answers, "monthly_ad_spend", 5000);
   const employees = num(answers, "total_employees", 8);
-
-  const monthlyTransactions = Math.min(sellers * 5, buyers * 0.8);
 
   const variables: ModelVariable[] = [
     input("sellers", "Active sellers", sellers, {
@@ -470,10 +443,6 @@ function generateMarketplace(answers: Answers): Scenario {
     currency: "AUD",
     startingCash: 400_000,
     variables,
-    goals: [
-      { id: "goal-gmv", metric: "revenue", direction: "at_least", threshold: monthlyTransactions * avgTransaction * takeRate * 3, byPeriod: 24, allPeriods: false },
-      { id: "goal-cash", metric: "cash", direction: "at_least", threshold: 0, byPeriod: 24, allPeriods: true },
-    ],
     businessProfile: { archetype: "marketplace", stage: "early", answers },
   };
 }
@@ -526,10 +495,6 @@ function generateManufacturing(answers: Answers): Scenario {
     currency: "AUD",
     startingCash: 300_000 + equipmentCost * 0.3,
     variables,
-    goals: [
-      { id: "goal-profit", metric: "profit", direction: "at_least", threshold: 0, byPeriod: 12, allPeriods: false },
-      { id: "goal-cash", metric: "cash", direction: "at_least", threshold: 0, byPeriod: 36, allPeriods: true },
-    ],
     businessProfile: { archetype: "manufacturing", stage: "early", answers },
   };
 }

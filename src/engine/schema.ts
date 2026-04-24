@@ -88,19 +88,6 @@ export const BusinessProfile = z.object({
 });
 export type BusinessProfile = z.infer<typeof BusinessProfile>;
 
-// ─── Goal ────────────────────────────────────────────────────────
-
-export const Goal = z.object({
-  id: z.string(),
-  metric: z.string(),
-  direction: z.enum(["at_least", "at_most", "between"]),
-  threshold: z.number(),
-  upperThreshold: z.number().optional(),
-  byPeriod: z.number().int(),
-  allPeriods: z.boolean().default(false),
-});
-export type Goal = z.infer<typeof Goal>;
-
 // ─── Scenario ────────────────────────────────────────────────────
 
 export const Scenario = z.object({
@@ -111,7 +98,6 @@ export const Scenario = z.object({
   currency: z.string().default("AUD"),
 
   variables: z.array(ModelVariable),
-  goals: z.array(Goal),
   startingCash: z.number(),
 
   businessProfile: BusinessProfile.optional(),
@@ -127,7 +113,6 @@ export const MonteCarloResult = z.object({
     z.string(),
     z.record(z.string(), z.array(z.number()))
   ),
-  winProbability: z.number(),
-  perGoalSuccess: z.record(z.string(), z.number()),
+  survivalRate: z.number(),
 });
 export type MonteCarloResult = z.infer<typeof MonteCarloResult>;

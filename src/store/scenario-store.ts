@@ -183,7 +183,7 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
       });
 
       // Run sensitivity analysis in background
-      api.runSensitivityAnalysis(scenario, result.winProbability).then(
+      api.runSensitivityAnalysis(scenario, result.survivalRate).then(
         (sensitivityResult) => set({ sensitivityResult }),
         (err) => console.error("Sensitivity analysis error:", err),
       );

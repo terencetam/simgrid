@@ -14,8 +14,6 @@ interface FanChartProps {
   height: number;
   /** Label for y axis */
   yLabel?: string;
-  /** Optional target threshold line */
-  threshold?: number;
 }
 
 const MARGIN = { top: 20, right: 20, bottom: 40, left: 70 };
@@ -25,7 +23,6 @@ export const FanChart = forwardRef<SVGSVGElement, FanChartProps>(function FanCha
   width,
   height,
   yLabel = "Revenue",
-  threshold,
 }, ref) {
   const innerWidth = width - MARGIN.left - MARGIN.right;
   const innerHeight = height - MARGIN.top - MARGIN.bottom;
@@ -38,11 +35,7 @@ export const FanChart = forwardRef<SVGSVGElement, FanChartProps>(function FanCha
   const T = p50.length;
 
   const { xScale, yScale } = useMemo(() => {
-    const allValues = [
-      ...p10,
-      ...p90,
-      ...(threshold != null ? [threshold] : []),
-    ];
+    const allValues = [...p10, ...p90];
     const minVal = Math.min(...allValues);
     const maxVal = Math.max(...allValues);
     const padding = (maxVal - minVal) * 0.1 || 1000;
@@ -58,7 +51,7 @@ export const FanChart = forwardRef<SVGSVGElement, FanChartProps>(function FanCha
         nice: true,
       }),
     };
-  }, [p10, p90, T, innerWidth, innerHeight, threshold]);
+  }, [p10, p90, T, innerWidth, innerHeight]);
 
   if (T === 0) return null;
 
@@ -108,19 +101,6 @@ export const FanChart = forwardRef<SVGSVGElement, FanChartProps>(function FanCha
           fill="rgba(99, 102, 241, 0.25)"
           curve={curveMonotoneX}
         />
-
-        {/* Threshold line */}
-        {threshold != null && (
-          <line
-            x1={0}
-            x2={innerWidth}
-            y1={yScale(threshold)}
-            y2={yScale(threshold)}
-            stroke="rgba(74, 222, 128, 0.6)"
-            strokeWidth={1.5}
-            strokeDasharray="6,4"
-          />
-        )}
 
         {/* P50 median line */}
         <LinePath

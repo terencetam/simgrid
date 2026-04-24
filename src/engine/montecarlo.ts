@@ -1,6 +1,4 @@
 import type { Scenario, MonteCarloResult } from "./schema";
-import type { RunMetrics } from "./core/goals";
-import { computeWinProbability, checkGoal } from "./core/goals";
 import { makeRng } from "./core/rng";
 import { compileScenario, simulateRun } from "./simulate";
 
@@ -14,7 +12,7 @@ interface AggregatedSeries {
 /** A sampled individual run trace for spaghetti animation */
 export interface SampleRun {
   values: Record<string, number[]>;
-  won: boolean;
+  survived: boolean;
 }
 
 /** Extended MC result that includes sample run traces for animation */
@@ -47,6 +45,7 @@ function computePercentiles(
 
 /**
  * Run Monte Carlo simulation.
+ * Survival = cash never goes negative across all periods.
  * @param sampleCount - Number of individual run traces to keep for spaghetti animation (default 200)
  */
 export function monteCarlo(
@@ -59,17 +58,14 @@ export function monteCarlo(
   const T = scenario.horizonPeriods;
   const compiled = compileScenario(scenario);
 
-  // Determine which variables to aggregate:
-  // - variables with chartMetric set
-  // - variables referenced by goals
+  // Determine which variables to aggregate (those with chartMetric set)
   const varsToAggregate = new Set<string>();
   for (const v of scenario.variables) {
     if (v.chartMetric) varsToAggregate.add(v.id);
   }
-  for (const g of scenario.goals) {
-    // Goal metrics reference variable IDs
-    varsToAggregate.add(g.metric);
-  }
+
+  // Find the cash variable ID (tagged with chartMetric: "cash")
+  const cashVarId = scenario.variables.find((v) => v.chartMetric === "cash")?.id;
 
   // Collect all run data for aggregation
   const allSeries: Record<string, number[][]> = {};
@@ -77,7 +73,7 @@ export function monteCarlo(
     allSeries[id] = [];
   }
 
-  const allRunMetrics: RunMetrics[] = [];
+  let survivedCount = 0;
   const sampleRuns: SampleRun[] = [];
   const sampleEvery = Math.max(
     1,
@@ -94,12 +90,10 @@ export function monteCarlo(
       if (s) allSeries[id].push([...s]);
     }
 
-    // Build run metrics for goal checking
-    const metrics: RunMetrics = {};
-    for (const [id, s] of result.series) {
-      metrics[id] = s;
-    }
-    allRunMetrics.push(metrics);
+    // Check survival: cash >= 0 for every period
+    const cashSeries = cashVarId ? result.series.get(cashVarId) : null;
+    const survived = cashSeries ? cashSeries.every((v) => v >= 0) : true;
+    if (survived) survivedCount++;
 
     // Sample runs for spaghetti animation
     if (
@@ -107,13 +101,12 @@ export function monteCarlo(
       i % sampleEvery === 0 &&
       sampleRuns.length < sampleCount
     ) {
-      const won = scenario.goals.every((g) => checkGoal(g, metrics));
       const values: Record<string, number[]> = {};
       for (const id of varsToAggregate) {
         const s = result.series.get(id);
         if (s) values[id] = [...s];
       }
-      sampleRuns.push({ values, won });
+      sampleRuns.push({ values, survived });
     }
 
     if (onProgress && i % 50 === 0) onProgress(i);
@@ -127,18 +120,14 @@ export function monteCarlo(
     }
   }
 
-  const { winProbability, perGoalSuccess } = computeWinProbability(
-    scenario.goals,
-    allRunMetrics
-  );
+  const survivalRate = nRuns > 0 ? survivedCount / nRuns : 0;
 
   return {
     result: {
       scenarioId: scenario.id,
       nRuns,
       percentiles,
-      winProbability,
-      perGoalSuccess,
+      survivalRate,
     },
     sampleRuns,
   };

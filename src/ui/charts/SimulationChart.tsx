@@ -19,7 +19,6 @@ interface SimulationChartProps {
   width: number;
   height: number;
   yLabel: string;
-  threshold?: number;
   /** Animation phase */
   phase: AnimationPhase;
   /** Called when animation sequence completes */
@@ -39,7 +38,6 @@ export function SimulationChart({
   width,
   height,
   yLabel,
-  threshold,
   phase,
   onAnimationComplete,
 }: SimulationChartProps) {
@@ -80,10 +78,6 @@ export function SimulationChart({
       if (v > maxVal) maxVal = v;
     }
   }
-  if (threshold != null) {
-    minVal = Math.min(minVal, threshold);
-    maxVal = Math.max(maxVal, threshold);
-  }
   const padding = (maxVal - minVal) * 0.1 || 1000;
   minVal = Math.min(minVal - padding, 0);
   maxVal = maxVal + padding;
@@ -116,7 +110,7 @@ export function SimulationChart({
       for (const run of sampleRuns) {
         const series = getRunSeries(run);
         ctx.beginPath();
-        ctx.strokeStyle = run.won
+        ctx.strokeStyle = run.survived
           ? "rgba(99, 102, 241, 0.35)"
           : "rgba(239, 68, 68, 0.3)";
         ctx.lineWidth = 1;
@@ -130,22 +124,9 @@ export function SimulationChart({
         ctx.stroke();
       }
 
-      // Draw threshold line if present
-      if (threshold != null) {
-        const ty = yScale(threshold) ?? 0;
-        ctx.beginPath();
-        ctx.strokeStyle = "rgba(74, 222, 128, 0.5)";
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([6, 4]);
-        ctx.moveTo(0, ty);
-        ctx.lineTo(innerWidth * progress, ty);
-        ctx.stroke();
-        ctx.setLineDash([]);
-      }
-
       ctx.restore();
     },
-    [sampleRuns, getRunSeries, T, xScale, yScale, innerWidth, threshold]
+    [sampleRuns, getRunSeries, T, xScale, yScale]
   );
 
   // Resize canvas for HiDPI
@@ -240,7 +221,6 @@ export function SimulationChart({
           width={width}
           height={height}
           yLabel={yLabel}
-          threshold={threshold}
         />
       </div>
     </div>

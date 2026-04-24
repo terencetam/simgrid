@@ -4,7 +4,7 @@ import { formatPercent } from "@/lib/format";
 interface GoalBarProps {
   scenarioName: string;
   archetypeLabel?: string;
-  winProbability: number | null;
+  survivalRate: number | null;
   isRunning: boolean;
   animate: boolean;
   progress?: number;
@@ -25,7 +25,7 @@ const btnClass =
 export function GoalBar({
   scenarioName,
   archetypeLabel,
-  winProbability,
+  survivalRate,
   isRunning,
   animate,
   progress = 0,
@@ -43,9 +43,9 @@ export function GoalBar({
   const prevProbRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (animate && winProbability != null) {
+    if (animate && survivalRate != null) {
       const from = prevProbRef.current ?? 0;
-      const to = winProbability;
+      const to = survivalRate;
       startTimeRef.current = performance.now();
 
       const tick = (now: number) => {
@@ -65,19 +65,19 @@ export function GoalBar({
       return () => cancelAnimationFrame(animFrameRef.current);
     }
 
-    if (!animate && winProbability != null) {
-      setDisplayValue(winProbability);
-      prevProbRef.current = winProbability;
+    if (!animate && survivalRate != null) {
+      setDisplayValue(survivalRate);
+      prevProbRef.current = survivalRate;
     }
 
-    if (winProbability == null) {
+    if (survivalRate == null) {
       setDisplayValue(null);
       prevProbRef.current = null;
     }
-  }, [winProbability, animate]);
+  }, [survivalRate, animate]);
 
-  const shown = displayValue ?? winProbability;
-  const probDisplay = shown != null ? formatPercent(shown) : "—";
+  const shown = displayValue ?? survivalRate;
+  const probDisplay = shown != null ? formatPercent(shown) : "\u2014";
 
   const probColor =
     shown == null
@@ -152,7 +152,7 @@ export function GoalBar({
 
         <div className="text-right">
           <div className="text-xs text-zinc-500 uppercase tracking-wider">
-            Win probability
+            Survival
           </div>
           <div className={`text-2xl font-mono font-bold ${probColor}`}>
             {isRunning ? (

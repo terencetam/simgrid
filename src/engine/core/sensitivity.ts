@@ -1,6 +1,6 @@
 /**
  * Sensitivity (tornado) analysis.
- * Measures marginal impact of lever changes on win probability.
+ * Measures marginal impact of lever changes on survival rate.
  */
 import type { Scenario } from "../schema";
 import { monteCarlo } from "../montecarlo";
@@ -8,20 +8,20 @@ import { monteCarlo } from "../montecarlo";
 export interface SensitivityResult {
   variableId: string;
   label: string;
-  winProbDown: number;
-  winProbUp: number;
+  survivalDown: number;
+  survivalUp: number;
   impact: number;
-  baseWinProb: number;
+  baseSurvivalRate: number;
 }
 
 export interface TornadoResult {
-  baseWinProb: number;
+  baseSurvivalRate: number;
   levers: SensitivityResult[];
   suggestedMove: {
     variableId: string;
     label: string;
     direction: "up" | "down";
-    newWinProb: number;
+    newSurvivalRate: number;
   } | null;
 }
 
@@ -40,7 +40,7 @@ function patchVariable(
 
 export function runSensitivity(
   scenario: Scenario,
-  baseWinProb: number,
+  baseSurvivalRate: number,
   pct: number = 0.1,
   runsPerScenario: number = 200,
   seed: number = 42
@@ -62,40 +62,40 @@ export function runSensitivity(
     results.push({
       variableId: v.id,
       label: v.name,
-      winProbDown: downResult.result.winProbability,
-      winProbUp: upResult.result.winProbability,
+      survivalDown: downResult.result.survivalRate,
+      survivalUp: upResult.result.survivalRate,
       impact: Math.abs(
-        upResult.result.winProbability - downResult.result.winProbability
+        upResult.result.survivalRate - downResult.result.survivalRate
       ),
-      baseWinProb,
+      baseSurvivalRate,
     });
   }
 
   results.sort((a, b) => b.impact - a.impact);
 
   let suggestedMove: TornadoResult["suggestedMove"] = null;
-  let bestWinProb = baseWinProb;
+  let bestSurvival = baseSurvivalRate;
 
   for (const r of results) {
-    if (r.winProbUp > bestWinProb) {
-      bestWinProb = r.winProbUp;
+    if (r.survivalUp > bestSurvival) {
+      bestSurvival = r.survivalUp;
       suggestedMove = {
         variableId: r.variableId,
         label: r.label,
         direction: "up",
-        newWinProb: r.winProbUp,
+        newSurvivalRate: r.survivalUp,
       };
     }
-    if (r.winProbDown > bestWinProb) {
-      bestWinProb = r.winProbDown;
+    if (r.survivalDown > bestSurvival) {
+      bestSurvival = r.survivalDown;
       suggestedMove = {
         variableId: r.variableId,
         label: r.label,
         direction: "down",
-        newWinProb: r.winProbDown,
+        newSurvivalRate: r.survivalDown,
       };
     }
   }
 
-  return { baseWinProb, levers: results, suggestedMove };
+  return { baseSurvivalRate, levers: results, suggestedMove };
 }

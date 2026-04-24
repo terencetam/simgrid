@@ -86,7 +86,7 @@ export function CompareView({ currentScenario }: CompareViewProps) {
       label: e.scenario.name,
       color: COLORS[idx % COLORS.length],
       data: e.result!.percentiles[metric] ?? {},
-      winProbability: e.result!.winProbability,
+      survivalRate: e.result!.survivalRate,
     }));
 
   const hasResults = chartSeries.length > 0;
@@ -117,7 +117,7 @@ export function CompareView({ currentScenario }: CompareViewProps) {
             )}
             {entry.result && (
               <span className="text-xs text-zinc-400">
-                Win: {Math.round(entry.result.winProbability * 100)}%
+                Survival: {Math.round(entry.result.survivalRate * 100)}%
               </span>
             )}
             {idx > 0 && (

@@ -54,7 +54,6 @@ describe("generateScenario", () => {
         expect(scenario.name).toBeTruthy();
         expect(scenario.horizonPeriods).toBeGreaterThan(0);
         expect(scenario.startingCash).toBeGreaterThan(0);
-        expect(scenario.goals.length).toBeGreaterThan(0);
         expect(scenario.businessProfile?.archetype).toBe(arch);
       });
 
@@ -102,8 +101,8 @@ describe("generateScenario", () => {
         const { result } = monteCarlo(scenario, 50, 42);
 
         expect(result.nRuns).toBe(50);
-        expect(result.winProbability).toBeGreaterThanOrEqual(0);
-        expect(result.winProbability).toBeLessThanOrEqual(1);
+        expect(result.survivalRate).toBeGreaterThanOrEqual(0);
+        expect(result.survivalRate).toBeLessThanOrEqual(1);
         expect(result.percentiles.revenue).toBeDefined();
         expect(result.percentiles.revenue["50"]).toHaveLength(scenario.horizonPeriods);
       });

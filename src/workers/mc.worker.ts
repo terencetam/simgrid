@@ -17,9 +17,9 @@ const api = {
 
   runSensitivityAnalysis(
     scenario: Scenario,
-    baseWinProb: number,
+    baseSurvivalRate: number,
   ): TornadoResult {
-    return runSensitivity(scenario, baseWinProb);
+    return runSensitivity(scenario, baseSurvivalRate);
   },
 };
 

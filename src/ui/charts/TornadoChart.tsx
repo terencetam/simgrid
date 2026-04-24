@@ -6,7 +6,7 @@ interface TornadoChartProps {
 }
 
 export function TornadoChart({ data }: TornadoChartProps) {
-  const { levers, baseWinProb, suggestedMove } = data;
+  const { levers, baseSurvivalRate, suggestedMove } = data;
 
   if (levers.length === 0) {
     return (
@@ -26,7 +26,7 @@ export function TornadoChart({ data }: TornadoChartProps) {
         Sensitivity Analysis
       </h2>
       <p className="text-xs text-zinc-600 mb-4">
-        Impact of +/-10% lever change on win probability
+        Impact of +/-10% lever change on survival rate
       </p>
 
       {/* Suggested move */}
@@ -42,9 +42,9 @@ export function TornadoChart({ data }: TornadoChartProps) {
             </span>{" "}
             by 10% to reach{" "}
             <span className="font-mono font-semibold text-green-400">
-              {formatPercent(suggestedMove.newWinProb)}
+              {formatPercent(suggestedMove.newSurvivalRate)}
             </span>{" "}
-            win probability
+            survival
           </div>
         </div>
       )}
@@ -55,7 +55,7 @@ export function TornadoChart({ data }: TornadoChartProps) {
           const isSuggested = suggestedMove?.variableId === lever.variableId;
 
           // Determine if going up or down helps
-          const upBetter = lever.winProbUp > lever.winProbDown;
+          const upBetter = lever.survivalUp > lever.survivalDown;
 
           return (
             <div key={lever.variableId} className="flex items-center gap-3">
@@ -72,7 +72,7 @@ export function TornadoChart({ data }: TornadoChartProps) {
                       !upBetter ? "bg-green-700" : "bg-red-900"
                     }`}
                     style={{
-                      width: `${(Math.abs(lever.winProbDown - baseWinProb) / maxImpact) * 100}%`,
+                      width: `${(Math.abs(lever.survivalDown - baseSurvivalRate) / maxImpact) * 100}%`,
                       minWidth: 2,
                     }}
                   />
@@ -86,7 +86,7 @@ export function TornadoChart({ data }: TornadoChartProps) {
                       upBetter ? "bg-green-700" : "bg-red-900"
                     }`}
                     style={{
-                      width: `${(Math.abs(lever.winProbUp - baseWinProb) / maxImpact) * 100}%`,
+                      width: `${(Math.abs(lever.survivalUp - baseSurvivalRate) / maxImpact) * 100}%`,
                       minWidth: 2,
                     }}
                   />
@@ -103,13 +103,13 @@ export function TornadoChart({ data }: TornadoChartProps) {
       {/* Legend */}
       <div className="flex gap-4 mt-4 text-[10px] text-zinc-600">
         <div className="flex items-center gap-1">
-          <div className="w-3 h-3 rounded bg-green-700" /> Improves win prob
+          <div className="w-3 h-3 rounded bg-green-700" /> Improves survival
         </div>
         <div className="flex items-center gap-1">
-          <div className="w-3 h-3 rounded bg-red-900" /> Hurts win prob
+          <div className="w-3 h-3 rounded bg-red-900" /> Hurts survival
         </div>
         <div className="ml-auto">
-          Base: {formatPercent(baseWinProb)}
+          Base: {formatPercent(baseSurvivalRate)}
         </div>
       </div>
     </div>

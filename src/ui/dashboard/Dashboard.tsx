@@ -82,10 +82,6 @@ export function Dashboard() {
   const chartData = result?.percentiles[activeVarId] ?? {};
   const metricLabel = CHART_METRIC_LABELS[activeMetric];
 
-  // Find goal threshold for the active metric
-  const goal = scenario.goals.find((g) => g.metric === activeVarId || g.metric === activeMetric);
-  const threshold = goal?.threshold;
-
   const handleAnimationComplete = useCallback(() => {
     setAnimationPhase("complete");
   }, [setAnimationPhase]);
@@ -150,7 +146,7 @@ export function Dashboard() {
             ? ARCHETYPE_CONFIGS[scenario.businessProfile.archetype]?.name
             : undefined
         }
-        winProbability={result?.winProbability ?? null}
+        survivalRate={result?.survivalRate ?? null}
         isRunning={isRunning}
         animate={animationPhase === "spaghetti" || animationPhase === "transition"}
         progress={progress}
@@ -261,7 +257,6 @@ export function Dashboard() {
                         width={width}
                         height={height}
                         yLabel={metricLabel}
-                        threshold={threshold}
                         phase={animationPhase}
                         onAnimationComplete={handleAnimationComplete}
                       />
@@ -276,7 +271,6 @@ export function Dashboard() {
                         width={width}
                         height={height}
                         yLabel={metricLabel}
-                        threshold={threshold}
                       />
                     )}
                   </ParentSize>

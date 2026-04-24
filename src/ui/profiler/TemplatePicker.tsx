@@ -28,7 +28,7 @@ export function TemplatePicker({ onSelect }: TemplatePickerProps) {
             <div className="flex flex-col gap-0.5 text-[10px] text-zinc-500">
               <span>{scenario.horizonPeriods} {scenario.timeStep}s</span>
               <span>{formatCurrency(scenario.startingCash)} starting cash</span>
-              <span>{scenario.goals.length} goal{scenario.goals.length !== 1 ? "s" : ""}</span>
+              <span>{scenario.variables.length} variables</span>
             </div>
           </button>
         );

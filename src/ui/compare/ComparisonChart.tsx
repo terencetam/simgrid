@@ -10,7 +10,7 @@ interface SeriesData {
   label: string;
   color: string;
   data: Record<string, number[]>;
-  winProbability: number;
+  survivalRate: number;
 }
 
 interface ComparisonChartProps {
@@ -160,7 +160,7 @@ export function ComparisonChart({
               {s.label}
             </text>
             <text x={26} y={18} fill="#71717a" fontSize={10}>
-              Win: {Math.round(s.winProbability * 100)}%
+              Survival: {Math.round(s.survivalRate * 100)}%
             </text>
           </Group>
         ))}
